@@ -1,0 +1,58 @@
+# ---------------------------------------------------------------------------
+# Anno - Caddy reverse proxy configuration
+#
+# Listens on :80 (HTTP) and :443 (HTTPS if TLS configured).
+# Proxies API and admin to Django on port 8000.
+# Serves static files, thumbnail cache, and internal image proxy directly.
+# ---------------------------------------------------------------------------
+
+{
+    grace_period 10s
+}
+
+:80 {
+    # Health check handled by Caddy directly (no Django dependency)
+    @health {
+        path /health/
+    }
+    respond @health "OK" 200
+
+    # Static files served directly by Caddy
+    handle_path /static/* {
+        root * /srv/static
+        file_server
+    }
+
+    # Thumbnail cache served directly from filesystem
+    # Django redirects here after thumbnail generation (cache hit or fresh)
+    handle_path /thumbnail-images/* {
+        root * /tmp/anno-thumbnails
+        file_server
+    }
+
+    # Internal image proxy to S3 (RustFS)
+    # Django redirects here for original image file access.
+    # Caddy strips the /internal-images/ prefix and proxies to RustFS.
+    # NOTE: This bypasses Django authentication. For production, consider
+    # adding Caddy JWT plugin or restricting access at the network level.
+    handle_path /original-images/* {
+        rewrite * /anno-images{uri}
+        reverse_proxy rustfs:9000
+    }
+
+    # Everything else reverse-proxied to Django
+    handle {
+        reverse_proxy django:8000 {
+            header_up Host {http.request.host}
+            header_up X-Forwarded-For {http.request.remote.host}
+            header_up X-Forwarded-Proto {http.request.scheme}
+            header_up X-Forwarded-Host {http.request.host}
+            header_up X-Forwarded-Port {http.request.port}
+        }
+    }
+
+    log {
+        output stdout
+        format json
+    }
+}

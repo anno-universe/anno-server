@@ -1,0 +1,29 @@
+services:
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: anno-rustfs
+    restart: unless-stopped
+    ports:
+      - "9000:9000" # S3 API + Console
+      - "9001:9001" # Console 相关端口，保留映射
+    environment:
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_ACCESS_KEY: "admin"
+      RUSTFS_SECRET_KEY: "admin123456"
+      RUSTFS_CONSOLE_ENABLE: "true"
+    volumes:
+      - ./data:/data
+      - ./logs:/logs
+    command: >
+      --address :9000
+      --console-enable
+      --access-key admin
+      --secret-key admin123456
+      /data
+    networks:
+      - anno-universe
+
+networks:
+  anno-universe:
+    name: anno-universe
+    external: true

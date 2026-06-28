@@ -1,0 +1,23 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: anno-caddy
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy_data:/data
+      - ../../staticfiles:/srv/static:ro
+      - /tmp/anno-thumbnails:/tmp/anno-thumbnails:ro
+    networks:
+      - anno-universe
+
+networks:
+  anno-universe:
+    name: anno-universe
+    external: true

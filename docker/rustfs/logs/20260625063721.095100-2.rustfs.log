@@ -1,0 +1,1 @@
+{"timestamp":"2026-06-24T19:24:06.810100401Z","level":"WARN","fields":{"message":"load_user_identity failed: user is expired, delete the user and mapped policy, name: EF473XULL3LNOS72ISFF, user_type: Sts"},"target":"rustfs_iam::store::object","filename":"crates/iam/src/store/object.rs","line_number":753,"threadName":"rustfs-worker","threadId":"ThreadId(5)"}

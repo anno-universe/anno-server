@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres
+    restart: always
+    container_name: anno-postgres
+    environment:
+      POSTGRES_PASSWORD: postgres
+      TZ: Asia/Shanghai
+    ports:
+      - 5432:5432
+    volumes:
+      - ./data:/var/lib/postgresql/
+    networks:
+      - anno-universe
+  
+networks:
+  anno-universe:
+    name: anno-universe
+    external: true
