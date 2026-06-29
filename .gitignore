@@ -11,3 +11,9 @@ wheels/
 
 # Environment secrets
 .env
+
+# Docker runtime data (external mount directories)
+docker/postgres/data/
+docker/caddy/caddy_data/
+docker/rustfs/data/
+docker/rustfs/logs/
