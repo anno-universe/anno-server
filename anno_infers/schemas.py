@@ -52,21 +52,7 @@ class ProjectImageOutput(Schema):
         )
 
 
-# ---------- Project annotation submission (the Flow-A protocol) ----------
-
-
-class ProjectAnnotationItemInput(Schema):
-    image_id: int
-    annotation_type: str  # "polygon" | "box" | "keypoint"
-    label: int | None = None
-    polygon: Polygon2DDataInput | None = None
-    box: Box2DDataInput | None = None
-    keypoint: Keypoint2DDataInput | None = None
-    client_ref: str | None = None  # echoed back so the edge side can correlate
-
-
-class ProjectAnnotationBatchInput(Schema):
-    items: list[ProjectAnnotationItemInput]
+# ---------- Project annotation submission ----------
 
 
 class ProjectAnnotationResultItem(Schema):
@@ -81,3 +67,75 @@ class ProjectAnnotationBatchOutput(Schema):
     created: int
     failed: int
     results: list[ProjectAnnotationResultItem]
+
+
+# ---------- Per-image annotation submission ----------
+
+
+class ProjectImageAnnotationInput(Schema):
+    """Single annotation for a specific image (image_id comes from the URL)."""
+
+    annotation_type: str  # "polygon" | "box" | "keypoint"
+    label: int | None = None
+    polygon: Polygon2DDataInput | None = None
+    box: Box2DDataInput | None = None
+    keypoint: Keypoint2DDataInput | None = None
+    client_ref: str | None = None
+
+
+class ProjectImageAnnotationBatchInput(Schema):
+    """Wrapper for per-image annotation submission."""
+
+    annotations: list[ProjectImageAnnotationInput]
+
+
+# ---------- Per-image annotation modify ----------
+
+
+class ProjectAnnotationModifyOutput(Schema):
+    """Returned after modifying an annotation via the infer API."""
+
+    id: int
+    image_id: int
+    annotation_type: str
+    label: int | None
+    data: dict
+    is_active: bool
+    created_at: datetime
+    modified_at: datetime
+
+    @staticmethod
+    def from_annotation(annotation) -> "ProjectAnnotationModifyOutput":
+        data: dict = {}
+        try:
+            subtype = annotation.polygon
+            data = {"points": subtype.points}
+        except Exception:
+            pass
+        try:
+            subtype = annotation.box
+            data = {
+                "x": subtype.x,
+                "y": subtype.y,
+                "width": subtype.width,
+                "height": subtype.height,
+                "rotation": subtype.rotation,
+            }
+        except Exception:
+            pass
+        try:
+            subtype = annotation.keypoint
+            data = {"points": subtype.points}
+        except Exception:
+            pass
+
+        return ProjectAnnotationModifyOutput(
+            id=annotation.id,
+            image_id=annotation.image_id,
+            annotation_type=annotation.annotation_type,
+            label=annotation.label,
+            data=data,
+            is_active=annotation.is_active,
+            created_at=annotation.created_at,
+            modified_at=annotation.updated_at,
+        )

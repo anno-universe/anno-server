@@ -56,3 +56,44 @@ def create_ai_annotation(
         performed_by=performed_by,
     )
     return annotation
+
+
+def modify_ai_annotation(
+    *,
+    old_annotation,
+    annotation_type,
+    label=None,
+    polygon=None,
+    box=None,
+    keypoint=None,
+    performed_by,
+):
+    """Modify an AI annotation using the immutable pattern.
+
+    Takes the old annotation (already resolved and scoped by the caller),
+    creates a new Annotation2D with the updated data, deactivates the old
+    one, and records an Operation(action="modify").
+
+    The caller is responsible for the surrounding transaction and for
+    resolving the old annotation (scoped to image + project + is_active).
+    """
+    new = Annotation2D.objects.create(
+        image=old_annotation.image,
+        project=old_annotation.project,
+        annotation_type=annotation_type,
+        label=label if label is not None else old_annotation.label,
+    )
+    _create_subtype(new, polygon=polygon, box=box, keypoint=keypoint)
+
+    old_annotation.is_active = False
+    old_annotation.save(update_fields=["is_active"])
+
+    Operation.objects.create(
+        image=old_annotation.image,
+        from_annotation=old_annotation,
+        to_annotation=new,
+        action="modify",
+        performed_by=performed_by,
+    )
+
+    return new
