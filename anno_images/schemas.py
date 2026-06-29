@@ -2,6 +2,8 @@ from datetime import datetime
 
 from ninja import Schema
 
+from anno_tags.schemas import ImageTagOutput
+
 # ---------- Image2D ----------
 
 
@@ -14,11 +16,16 @@ class Image2DOutput(Schema):
     width: int | None
     height: int | None
     annotation_count: int = 0
+    tags: list[ImageTagOutput] = []
     created_at: datetime
     updated_at: datetime
 
     @staticmethod
     def from_image(img) -> "Image2DOutput":
+        tags = []
+        # Populated when prefetch_related("tags__tag") was used on the queryset
+        if hasattr(img, "tags") and hasattr(img.tags, "all"):
+            tags = [ImageTagOutput.from_image_tag(t) for t in img.tags.all()]
         return Image2DOutput(
             id=img.id,
             project_id=img.project_id,
@@ -28,6 +35,7 @@ class Image2DOutput(Schema):
             width=img.width,
             height=img.height,
             annotation_count=getattr(img, "annotation_count", 0),
+            tags=tags,
             created_at=img.created_at,
             updated_at=img.updated_at,
         )

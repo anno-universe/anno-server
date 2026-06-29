@@ -45,6 +45,7 @@ ALLOWED_HOSTS = (
 INSTALLED_APPS = [
     "anno_users",
     "anno_projects",
+    "anno_tags",
     "anno_images",
     "anno_infers",
     "django.contrib.admin",

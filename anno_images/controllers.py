@@ -12,6 +12,7 @@ from django.shortcuts import get_object_or_404
 from ninja import File
 from ninja.files import UploadedFile
 from ninja_extra import api_controller, http_delete, http_get, http_patch, http_post
+from ninja_extra.exceptions import HttpError
 from ninja_extra.permissions import IsAuthenticated
 from ninja_jwt.authentication import JWTAuth
 from PIL import Image as PILImage
@@ -19,6 +20,7 @@ from PIL import Image as PILImage
 from anno.pagination import PaginatedResponse, paginate_queryset
 from anno_projects.models import Project
 from anno_projects.permissions import IsProjectMemberOrAdmin, IsProjectSupervisorOrAdmin
+from anno_tags.models import ProjectTag
 
 from .models import Annotation2D, Box2D, Image2D, Keypoint2D, Polygon2D, Operation
 from .schemas import (
@@ -89,15 +91,50 @@ class Image2DController:
         url_name="image_list",
     )
     def list_images(
-        self, request, project_id: int, limit: int = 100, offset: int = 0
+        self,
+        request,
+        project_id: int,
+        limit: int = 100,
+        offset: int = 0,
+        tag: str | None = None,
     ):
         project = get_object_or_404(Project, id=project_id)
-        qs = Image2D.objects.filter(project=project).annotate(
-            annotation_count=Count("annotations", filter=Q(annotations__is_active=True))
+        qs = Image2D.objects.filter(project=project)
+
+        # Tag filtering with AND semantics (comma-separated tag names)
+        if tag:
+            tag_names = [t.strip() for t in tag.split(",") if t.strip()]
+            if tag_names:
+                tag_ids = list(
+                    ProjectTag.objects.filter(
+                        project=project, name__in=tag_names, is_active=True
+                    ).values_list("id", flat=True)
+                )
+                if len(tag_ids) != len(tag_names):
+                    found = set(
+                        ProjectTag.objects.filter(
+                            project=project, name__in=tag_names, is_active=True
+                        ).values_list("name", flat=True)
+                    )
+                    missing = [n for n in tag_names if n not in found]
+                    raise HttpError(400, f"Unknown tag(s): {', '.join(missing)}")
+                for tid in tag_ids:
+                    qs = qs.filter(tags__tag_id=tid)
+
+        qs = (
+            qs.annotate(
+                annotation_count=Count(
+                    "annotations", filter=Q(annotations__is_active=True)
+                )
+            )
+            .prefetch_related("tags__tag")
+            .distinct()
         )
         count, limit, offset, rows = paginate_queryset(qs, limit, offset)
         return 200, PaginatedResponse(
-            count=count, limit=limit, offset=offset,
+            count=count,
+            limit=limit,
+            offset=offset,
             items=[Image2DOutput.from_image(img) for img in rows],
         )
 
