@@ -253,17 +253,13 @@ class ProviderOutput(Schema):
 
 
 class AutoAnnotateInput(Schema):
-    """Kick off an auto-annotation job.
+    """Kick off an auto-annotation job for ALL images in the project.
 
-    Provide ``image_ids`` to target specific images, or omit it to target the
-    whole project (optionally narrowed to images without active annotations via
-    ``only_unannotated``). ``max_images`` is a safety cap.
+    The endpoint always targets every image in the project. If you need
+    to process only a subset, create a separate project for those images.
     """
 
     provider_id: int
-    image_ids: list[int] | None = None
-    only_unannotated: bool = False
-    max_images: int | None = None
 
 
 class JobItemOutput(Schema):

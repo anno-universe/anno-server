@@ -14,7 +14,7 @@ from django.test import Client, TestCase, override_settings
 
 from anno_images.models import Annotation2D, Image2D, Operation
 from anno_projects.models import Project, ProjectMembership
-from anno_sdk import Annotation, Box2D, InferenceResponse, Mask2D
+from anno_sdk import Annotation, Box2D, InferenceResponse, Polygon2D
 from ninja_jwt.tokens import RefreshToken
 
 from anno_infers.models import (
@@ -231,7 +231,8 @@ class AutoAnnotateStartTests(FlowBBaseTest):
             set(job.items.values_list("image_id", flat=True)), {img1.id, img2.id}
         )
 
-    def test_start_only_unannotated(self):
+    def test_start_includes_all_images(self):
+        """All images in the project are included, annotated or not."""
         prov = self._make_provider(project=self.project)
         annotated = self._make_image(self.project, "x.png")
         Annotation2D.objects.create(
@@ -240,14 +241,15 @@ class AutoAnnotateStartTests(FlowBBaseTest):
         fresh = self._make_image(self.project, "y.png")
         res = self.client.post(
             f"/api/projects/{self.project.id}/auto-annotate/",
-            data=json.dumps({"provider_id": prov.id, "only_unannotated": True}),
+            data=json.dumps({"provider_id": prov.id}),
             content_type="application/json",
             headers=_auth(self.supervisor),
         )
         self.assertEqual(res.status_code, 201)
         job = InferenceJob.objects.get(id=res.json()["id"])
         self.assertEqual(
-            list(job.items.values_list("image_id", flat=True)), [fresh.id]
+            set(job.items.values_list("image_id", flat=True)),
+            {annotated.id, fresh.id},
         )
 
     def test_start_no_images_400(self):
@@ -296,7 +298,7 @@ class WorkerTests(FlowBBaseTest):
         payload = InferenceResponse(
             annotations=[
                 Annotation(label=0, geometry=Box2D(1, 2, 3, 4)),
-                Annotation(label=1, geometry=Mask2D([[0, 0], [1, 1], [2, 0]])),
+                Annotation(label=1, geometry=Polygon2D([[0, 0], [1, 1], [2, 0]])),
             ]
         ).to_dict()
 
@@ -321,7 +323,7 @@ class WorkerTests(FlowBBaseTest):
         payload = InferenceResponse(
             annotations=[
                 Annotation(label=0, geometry=Box2D(1, 2, 3, 4)),
-                Annotation(label=1, geometry=Mask2D([[0, 0], [1, 1]])),  # polygon, unsupported
+                Annotation(label=1, geometry=Polygon2D([[0, 0], [1, 1]])),  # polygon, unsupported
             ]
         ).to_dict()
 
@@ -416,24 +418,31 @@ class WorkerTests(FlowBBaseTest):
         self.assertEqual(meta["image_id"], img.id)
         self.assertIn("image", kwargs["files"])
 
-    def test_worker_deadline_skips_and_fails(self):
+    def test_worker_recomputes_deadline_on_start(self):
+        """Worker resets deadline based on now, ignoring an already-expired one."""
         from datetime import timedelta
         from django.utils import timezone
 
         prov = self._make_provider(project=self.project, types=("box",))
         img = self._make_image(self.project)
         job = self._make_job(prov, [img])
-        job.deadline = timezone.now() - timedelta(seconds=1)  # already past
+        job.deadline = timezone.now() - timedelta(seconds=3600)  # expired an hour ago
         job.save(update_fields=["deadline"])
 
-        with patch("anno_infers.tasks.httpx.post") as mock_post:
+        payload = InferenceResponse(
+            annotations=[Annotation(label=0, geometry=Box2D(0, 0, 1, 1))]
+        ).to_dict()
+
+        with patch(
+            "anno_infers.tasks.httpx.post", return_value=_fake_response(payload)
+        ):
             execute_inference_job(job.id)
-            mock_post.assert_not_called()
 
         job.refresh_from_db()
-        self.assertEqual(job.status, "failed")
-        self.assertEqual(job.error, "deadline exceeded")
-        self.assertEqual(job.items.get().status, "skipped")
+        # Deadline was recomputed, so processing succeeded.
+        self.assertEqual(job.status, "completed")
+        self.assertEqual(job.completed_items, 1)
+        self.assertEqual(job.items.get().status, "done")
 
     def test_worker_query_auth(self):
         prov = self._make_provider(
