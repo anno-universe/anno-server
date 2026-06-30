@@ -328,3 +328,17 @@ class JobDetailOutput(JobOutput):
             **base.dict(),
             items=[JobItemOutput.from_item(i) for i in job.items.all()],
         )
+
+
+# ---------- Single-image auto-annotation (Flow B) ----------
+
+
+class ImageAutoAnnotateInput(Schema):
+    """Trigger server-driven inference for a single image asynchronously.
+
+    Creates a single-item ``InferenceJob`` and enqueues it for the background
+    worker, returning the job details immediately — same pattern as the batch
+    endpoint. Use ``GET /jobs/{job_id}`` to track progress and results.
+    """
+
+    provider_id: int

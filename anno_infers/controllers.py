@@ -30,6 +30,7 @@ from .auth import ProjectAPIKeyAuth
 from .models import InferenceJob, InferenceJobItem, InferenceServiceProvider
 from .schemas import (
     AutoAnnotateInput,
+    ImageAutoAnnotateInput,
     JobDetailOutput,
     JobOutput,
     ProjectAnnotationBatchOutput,
@@ -486,3 +487,73 @@ class AutoAnnotateController:
             transaction.on_commit(lambda: run_inference_job.enqueue(job.id))
 
         return 200, JobOutput.from_job(job)
+
+
+# ---------------------------------------------------------------------------
+# Single-image auto-annotation (JWT, supervisor-triggered; Flow B)
+# ---------------------------------------------------------------------------
+
+
+@api_controller(
+    "/projects/{project_id}/images/{image_id}/auto-annotate", tags=["infer-auto"]
+)
+class ImageAutoAnnotateController:
+    """Trigger server-driven inference for a single image asynchronously.
+
+    Creates a single-item ``InferenceJob`` and enqueues it for the background
+    worker, then returns immediately — same pattern as the batch endpoint.
+    """
+
+    @http_post(
+        "/",
+        permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
+        auth=JWTAuth(),
+        response={201: JobOutput},
+        url_name="infer_image_auto_annotate",
+    )
+    def auto_annotate_image(
+        self,
+        request,
+        project_id: int,
+        image_id: int,
+        payload: ImageAutoAnnotateInput,
+    ):
+        project = get_object_or_404(Project, id=project_id)
+        image = get_object_or_404(Image2D, id=image_id, project=project)
+
+        provider = (
+            _visible_providers(project_id)
+            .filter(id=payload.provider_id, is_active=True)
+            .first()
+        )
+        if provider is None:
+            raise HttpError(404, "Active provider not found for this project.")
+
+        deadline = timezone.now() + timedelta(seconds=2 * provider.timeout_seconds)
+
+        logger.info(
+            "Creating single-image auto-annotation job: project_id=%d image_id=%d "
+            "provider_id=%d",
+            project.id,
+            image.id,
+            provider.id,
+        )
+        with transaction.atomic():
+            job = InferenceJob.objects.create(
+                project=project,
+                provider=provider,
+                created_by=request.user,
+                total_items=1,
+                deadline=deadline,
+            )
+            InferenceJobItem.objects.create(job=job, image=image)
+            transaction.on_commit(lambda: run_inference_job.enqueue(job.id))
+
+        logger.info(
+            "Single-image auto-annotation job %d created and task enqueued: "
+            "image_id=%d deadline=%s",
+            job.id,
+            image.id,
+            deadline.isoformat(),
+        )
+        return 201, JobOutput.from_job(job)
