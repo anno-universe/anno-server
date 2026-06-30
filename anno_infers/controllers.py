@@ -1,16 +1,34 @@
+from datetime import timedelta
+
 from django.conf import settings as django_settings
 from django.db import transaction
+from django.db.models import Q
 from django.http import StreamingHttpResponse
 from django.shortcuts import get_object_or_404
-from ninja_extra import api_controller, http_get, http_patch, http_post
-from ninja_extra.permissions import AllowAny
+from django.utils import timezone
+from ninja_extra import (
+    api_controller,
+    http_delete,
+    http_get,
+    http_patch,
+    http_post,
+)
+from ninja_extra.exceptions import HttpError
+from ninja_extra.permissions import AllowAny, IsAuthenticated
+from ninja_jwt.authentication import JWTAuth
 
 from anno.pagination import PaginatedResponse, paginate_queryset
 from anno_images.controllers import _presigned_redirect
 from anno_images.models import Annotation2D, Image2D
+from anno_projects.models import Project
+from anno_projects.permissions import IsProjectMemberOrAdmin, IsProjectSupervisorOrAdmin
 
 from .auth import ProjectAPIKeyAuth
+from .models import InferenceJob, InferenceJobItem, InferenceServiceProvider
 from .schemas import (
+    AutoAnnotateInput,
+    JobDetailOutput,
+    JobOutput,
     ProjectAnnotationBatchOutput,
     ProjectAnnotationModifyOutput,
     ProjectAnnotationResultItem,
@@ -18,8 +36,12 @@ from .schemas import (
     ProjectImageAnnotationInput,
     ProjectImageOutput,
     ProjectMetaOutput,
+    ProviderCreateInput,
+    ProviderOutput,
+    ProviderUpdateInput,
 )
 from .services import create_ai_annotation, modify_ai_annotation
+from .tasks import run_inference_job
 
 
 # ---------------------------------------------------------------------------
@@ -206,3 +228,250 @@ class ProjectInferController:
         )
 
         return 200, ProjectAnnotationModifyOutput.from_annotation(new)
+
+
+# ---------------------------------------------------------------------------
+# Inference service provider registry (JWT; Flow B)
+#
+# Providers are either global (project=null, admin-managed via Django admin and
+# read-only here) or project-scoped (created/edited by supervisors). Members can
+# list what's usable; only supervisors can mutate project-scoped providers.
+# ---------------------------------------------------------------------------
+
+
+def _visible_providers(project_id: int):
+    """Providers usable by a project: its own plus global ones."""
+    return InferenceServiceProvider.objects.filter(
+        Q(project_id=project_id) | Q(project__isnull=True)
+    )
+
+
+@api_controller("/projects/{project_id}/inference-providers", tags=["infer-providers"])
+class InferenceProviderController:
+
+    @http_get(
+        "/",
+        permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
+        auth=JWTAuth(),
+        response={200: PaginatedResponse[ProviderOutput]},
+        url_name="infer_provider_list",
+    )
+    def list_providers(
+        self,
+        request,
+        project_id: int,
+        limit: int = 100,
+        offset: int = 0,
+        is_active: bool | None = None,
+    ):
+        qs = _visible_providers(project_id)
+        if is_active is not None:
+            qs = qs.filter(is_active=is_active)
+        qs = qs.order_by("-created_at")
+        count, limit, offset, rows = paginate_queryset(qs, limit, offset)
+        return 200, PaginatedResponse(
+            count=count,
+            limit=limit,
+            offset=offset,
+            items=[ProviderOutput.from_provider(p) for p in rows],
+        )
+
+    @http_post(
+        "/",
+        permissions=[IsAuthenticated, IsProjectSupervisorOrAdmin],
+        auth=JWTAuth(),
+        response={201: ProviderOutput},
+        url_name="infer_provider_create",
+    )
+    def create(self, request, project_id: int, payload: ProviderCreateInput):
+        project = get_object_or_404(Project, id=project_id)
+        provider = InferenceServiceProvider.objects.create(
+            project=project,
+            created_by=request.user,
+            **payload.dict(),
+        )
+        return 201, ProviderOutput.from_provider(provider)
+
+    @http_get(
+        "/{provider_id}",
+        permissions=[IsAuthenticated, IsProjectSupervisorOrAdmin],
+        auth=JWTAuth(),
+        response={200: ProviderOutput},
+        url_name="infer_provider_detail",
+    )
+    def detail(self, request, project_id: int, provider_id: int):
+        provider = get_object_or_404(
+            _visible_providers(project_id), id=provider_id
+        )
+        return 200, ProviderOutput.from_provider(provider)
+
+    @http_patch(
+        "/{provider_id}",
+        permissions=[IsAuthenticated, IsProjectSupervisorOrAdmin],
+        auth=JWTAuth(),
+        response={200: ProviderOutput},
+        url_name="infer_provider_update",
+    )
+    def update(self, request, project_id: int, provider_id: int, payload: ProviderUpdateInput):
+        # Only project-scoped providers are editable here; globals are admin-managed.
+        provider = get_object_or_404(
+            InferenceServiceProvider, id=provider_id, project_id=project_id
+        )
+        for attr, value in payload.dict(exclude_unset=True).items():
+            setattr(provider, attr, value)
+        provider.save()
+        return 200, ProviderOutput.from_provider(provider)
+
+    @http_delete(
+        "/{provider_id}",
+        permissions=[IsAuthenticated, IsProjectSupervisorOrAdmin],
+        auth=JWTAuth(),
+        response={204: None},
+        url_name="infer_provider_delete",
+    )
+    def delete(self, request, project_id: int, provider_id: int):
+        provider = get_object_or_404(
+            InferenceServiceProvider, id=provider_id, project_id=project_id
+        )
+        provider.delete()
+        return 204, None
+
+
+# ---------------------------------------------------------------------------
+# Auto-annotation jobs (JWT, supervisor-triggered; Flow B)
+# ---------------------------------------------------------------------------
+
+
+@api_controller("/projects/{project_id}/auto-annotate", tags=["infer-auto"])
+class AutoAnnotateController:
+
+    @http_post(
+        "/",
+        permissions=[IsAuthenticated, IsProjectSupervisorOrAdmin],
+        auth=JWTAuth(),
+        response={201: JobOutput},
+        url_name="infer_auto_annotate",
+    )
+    def start(self, request, project_id: int, payload: AutoAnnotateInput):
+        project = get_object_or_404(Project, id=project_id)
+
+        provider = _visible_providers(project_id).filter(
+            id=payload.provider_id, is_active=True
+        ).first()
+        if provider is None:
+            raise HttpError(404, "Active provider not found for this project.")
+
+        # Resolve the target image set.
+        qs = Image2D.objects.filter(project=project)
+        if payload.image_ids:
+            qs = qs.filter(id__in=payload.image_ids)
+        elif payload.only_unannotated:
+            qs = qs.exclude(annotations__is_active=True)
+        qs = qs.order_by("id")
+        image_ids = list(qs.values_list("id", flat=True))
+        if payload.max_images is not None:
+            image_ids = image_ids[: max(0, payload.max_images)]
+        if not image_ids:
+            raise HttpError(400, "No images match the selection.")
+
+        # Bound the whole job: time for each image plus a small buffer.
+        deadline = timezone.now() + timedelta(
+            seconds=(len(image_ids) + 1) * provider.timeout_seconds
+        )
+
+        with transaction.atomic():
+            job = InferenceJob.objects.create(
+                project=project,
+                provider=provider,
+                created_by=request.user,
+                total_items=len(image_ids),
+                deadline=deadline,
+            )
+            InferenceJobItem.objects.bulk_create(
+                [InferenceJobItem(job=job, image_id=iid) for iid in image_ids]
+            )
+            transaction.on_commit(lambda: run_inference_job.enqueue(job.id))
+
+        return 201, JobOutput.from_job(job)
+
+    @http_get(
+        "/jobs",
+        permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
+        auth=JWTAuth(),
+        response={200: PaginatedResponse[JobOutput]},
+        url_name="infer_auto_job_list",
+    )
+    def list_jobs(self, request, project_id: int, limit: int = 100, offset: int = 0):
+        qs = InferenceJob.objects.filter(project_id=project_id).order_by("-created_at")
+        count, limit, offset, rows = paginate_queryset(qs, limit, offset)
+        return 200, PaginatedResponse(
+            count=count,
+            limit=limit,
+            offset=offset,
+            items=[JobOutput.from_job(j) for j in rows],
+        )
+
+    @http_get(
+        "/jobs/{job_id}",
+        permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
+        auth=JWTAuth(),
+        response={200: JobDetailOutput},
+        url_name="infer_auto_job_detail",
+    )
+    def job_detail(self, request, project_id: int, job_id: int):
+        job = get_object_or_404(
+            InferenceJob.objects.prefetch_related("items"),
+            id=job_id,
+            project_id=project_id,
+        )
+        return 200, JobDetailOutput.from_job_with_items(job)
+
+    @http_post(
+        "/jobs/{job_id}/cancel",
+        permissions=[IsAuthenticated, IsProjectSupervisorOrAdmin],
+        auth=JWTAuth(),
+        response={200: JobOutput},
+        url_name="infer_auto_job_cancel",
+    )
+    def cancel(self, request, project_id: int, job_id: int):
+        job = get_object_or_404(InferenceJob, id=job_id, project_id=project_id)
+        job.cancel_requested = True
+        if job.status in (InferenceJob.STATUS_PENDING, InferenceJob.STATUS_RUNNING):
+            job.status = InferenceJob.STATUS_CANCELLING
+        job.save(update_fields=["cancel_requested", "status"])
+        return 200, JobOutput.from_job(job)
+
+    @http_post(
+        "/jobs/{job_id}/retry",
+        permissions=[IsAuthenticated, IsProjectSupervisorOrAdmin],
+        auth=JWTAuth(),
+        response={200: JobOutput},
+        url_name="infer_auto_job_retry",
+    )
+    def retry(self, request, project_id: int, job_id: int):
+        job = get_object_or_404(InferenceJob, id=job_id, project_id=project_id)
+
+        with transaction.atomic():
+            reset = job.items.filter(
+                status__in=[InferenceJobItem.STATUS_FAILED, InferenceJobItem.STATUS_SKIPPED]
+            ).update(status=InferenceJobItem.STATUS_PENDING)
+            job.failed_items = 0
+            job.cancel_requested = False
+            job.status = InferenceJob.STATUS_PENDING
+            job.error = ""
+            # Refresh the deadline relative to the work remaining.
+            job.deadline = timezone.now() + timedelta(
+                seconds=(reset + 1) * job.provider.timeout_seconds
+            )
+            job.save(
+                update_fields=[
+                    "failed_items",
+                    "cancel_requested",
+                    "status",
+                    "error",
+                    "deadline",
+                ]
+            )
+            transaction.on_commit(lambda: run_inference_job.enqueue(job.id))
+
+        return 200, JobOutput.from_job(job)

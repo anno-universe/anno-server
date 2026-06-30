@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "ninja_extra",
     "storages",
+    "django_tasks_db",
 ]
 
 MIDDLEWARE = [
@@ -183,6 +184,16 @@ CACHES = {
 # Base URL used to construct callback URLs sent to external model services.
 # The model service must be able to reach this URL to post results back.
 INFERS_BASE_URL = os.environ.get("INFERS_BASE_URL", "http://localhost:8000")
+
+# Background tasks (django-tasks + django-tasks-db).
+# The DatabaseBackend stores enqueued tasks in Postgres; run a worker with
+# `python manage.py db_worker`. Auto-annotation jobs (anno_infers) enqueue here.
+TASKS = {
+    "default": {
+        "BACKEND": "django_tasks_db.DatabaseBackend",
+        "QUEUES": ["default"],
+    }
+}
 
 STORAGES = {
     "default": {
