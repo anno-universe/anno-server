@@ -1,3 +1,4 @@
+import logging
 from datetime import timedelta
 
 from django.conf import settings as django_settings
@@ -6,6 +7,8 @@ from django.db.models import Q
 from django.http import StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 from ninja_extra import (
     api_controller,
     http_delete,
@@ -361,24 +364,26 @@ class AutoAnnotateController:
         if provider is None:
             raise HttpError(404, "Active provider not found for this project.")
 
-        # Resolve the target image set.
-        qs = Image2D.objects.filter(project=project)
-        if payload.image_ids:
-            qs = qs.filter(id__in=payload.image_ids)
-        elif payload.only_unannotated:
-            qs = qs.exclude(annotations__is_active=True)
-        qs = qs.order_by("id")
-        image_ids = list(qs.values_list("id", flat=True))
-        if payload.max_images is not None:
-            image_ids = image_ids[: max(0, payload.max_images)]
+        # Target ALL images in the project.
+        image_ids = list(
+            Image2D.objects.filter(project=project)
+            .order_by("id")
+            .values_list("id", flat=True)
+        )
         if not image_ids:
-            raise HttpError(400, "No images match the selection.")
+            raise HttpError(400, "No images in project.")
 
         # Bound the whole job: time for each image plus a small buffer.
         deadline = timezone.now() + timedelta(
             seconds=(len(image_ids) + 1) * provider.timeout_seconds
         )
 
+        logger.info(
+            "Creating auto-annotation job: project_id=%d provider_id=%d image_count=%d",
+            project.id,
+            provider.id,
+            len(image_ids),
+        )
         with transaction.atomic():
             job = InferenceJob.objects.create(
                 project=project,
@@ -392,6 +397,12 @@ class AutoAnnotateController:
             )
             transaction.on_commit(lambda: run_inference_job.enqueue(job.id))
 
+        logger.info(
+            "Auto-annotation job %d created and task enqueued: %d items, deadline=%s",
+            job.id,
+            len(image_ids),
+            deadline.isoformat(),
+        )
         return 201, JobOutput.from_job(job)
 
     @http_get(

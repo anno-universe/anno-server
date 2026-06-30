@@ -14,8 +14,10 @@ replay all live in the job/item rows, so this worker is just a driver.
 from __future__ import annotations
 
 import json
+import logging
 import mimetypes
 import os
+from datetime import timedelta
 
 import httpx
 from django.db import transaction
@@ -28,6 +30,8 @@ from anno_sdk import InferenceRequestMeta, InferenceResponse
 
 from .models import InferenceJob, InferenceJobItem
 from .services import create_ai_annotation
+
+logger = logging.getLogger(__name__)
 
 
 def _annotation_to_kwargs(annotation) -> dict:
@@ -76,6 +80,16 @@ def _call_provider(provider, image_bytes: bytes, file_name: str, meta: Inference
     content_type = mimetypes.guess_type(file_name or "")[0] or "application/octet-stream"
     files = {"image": (file_name or "image", image_bytes, content_type)}
     data = {"metadata": json.dumps(meta.to_dict())}
+
+    logger.debug(
+        "Calling provider %s at %s: image_id=%s job_id=%s timeout=%ds size=%d",
+        provider.name,
+        provider.inference_url,
+        meta.image_id,
+        meta.job_id,
+        provider.timeout_seconds,
+        len(image_bytes),
+    )
     resp = httpx.post(
         provider.inference_url,
         files=files,
@@ -85,7 +99,14 @@ def _call_provider(provider, image_bytes: bytes, file_name: str, meta: Inference
         timeout=provider.timeout_seconds,
     )
     resp.raise_for_status()
-    return InferenceResponse.from_dict(resp.json())
+    response = InferenceResponse.from_dict(resp.json())
+    logger.debug(
+        "Provider %s returned %d annotations for image_id=%s",
+        provider.name,
+        len(response.annotations),
+        meta.image_id,
+    )
+    return response
 
 
 def _process_item(job, item: InferenceJobItem) -> None:
@@ -96,6 +117,14 @@ def _process_item(job, item: InferenceJobItem) -> None:
     """
     provider = job.provider
     image = item.image
+
+    logger.info(
+        "Processing item %d: image_id=%d file=%s (attempt %d)",
+        item.id,
+        image.id,
+        image.file_name,
+        item.attempts + 1,
+    )
 
     with image.image.open("rb") as fh:
         image_bytes = fh.read()
@@ -117,7 +146,12 @@ def _process_item(job, item: InferenceJobItem) -> None:
     with transaction.atomic():
         for ann in response.annotations:
             if ann.geometry.annotation_type not in supported:
-                # Guard against a service returning a type it never declared.
+                logger.warning(
+                    "Item %d: provider returned unsupported type %r for image_id=%d, skipping",
+                    item.id,
+                    ann.geometry.annotation_type,
+                    image.id,
+                )
                 continue
             create_ai_annotation(
                 image=image,
@@ -138,6 +172,13 @@ def _process_item(job, item: InferenceJobItem) -> None:
         annotations_created=F("annotations_created") + created,
     )
 
+    logger.info(
+        "Item %d done: image_id=%d annotations_created=%d",
+        item.id,
+        image.id,
+        created,
+    )
+
 
 @task()
 def run_inference_job(job_id: int) -> None:
@@ -150,6 +191,8 @@ def execute_inference_job(job_id: int) -> None:
 
     Plain function (no task wrapper) so it can be driven directly in tests.
     """
+    logger.info("Worker picked up job %d", job_id)
+
     job = (
         InferenceJob.objects.select_related("provider", "project", "created_by")
         .filter(pk=job_id)
@@ -159,12 +202,40 @@ def execute_inference_job(job_id: int) -> None:
         InferenceJob.STATUS_PENDING,
         InferenceJob.STATUS_RUNNING,
     ):
+        logger.info(
+            "Job %d skipped: job=%s status=%s",
+            job_id,
+            "found" if job else "not_found",
+            job.status if job else "n/a",
+        )
         return
+
+    logger.info(
+        "Job %d starting: project=%s provider=%s total_items=%d",
+        job_id,
+        job.project.name,
+        job.provider.name,
+        job.total_items,
+    )
 
     job.status = InferenceJob.STATUS_RUNNING
     job.started_at = job.started_at or timezone.now()
     job.error = ""
-    job.save(update_fields=["status", "started_at", "error"])
+
+    # Recompute deadline from *now* so it reflects actual processing time,
+    # not wall-clock time since job creation (worker may have been delayed).
+    job.deadline = timezone.now() + timedelta(
+        seconds=(job.total_items + 1) * job.provider.timeout_seconds
+    )
+    job.save(update_fields=["status", "started_at", "error", "deadline"])
+
+    logger.info(
+        "Job %d deadline set to %s (%d items × %ds timeout)",
+        job_id,
+        job.deadline.isoformat(),
+        job.total_items,
+        job.provider.timeout_seconds,
+    )
 
     items = (
         job.items.filter(
@@ -174,11 +245,20 @@ def execute_inference_job(job_id: int) -> None:
         .order_by("id")
     )
 
+    item_count = len(items)
+    logger.info("Job %d: %d items to process", job_id, item_count)
+
     final_status = InferenceJob.STATUS_COMPLETED
     error_message = ""
-    for item in items:
+    for idx, item in enumerate(items, 1):
         # Cooperative cancel: re-read the flag fresh each iteration.
         if InferenceJob.objects.filter(pk=job.pk, cancel_requested=True).exists():
+            logger.info(
+                "Job %d: cancel requested, skipping remaining items (processed %d/%d)",
+                job_id,
+                idx - 1,
+                item_count,
+            )
             job.items.filter(
                 status__in=[InferenceJobItem.STATUS_PENDING, InferenceJobItem.STATUS_FAILED]
             ).update(status=InferenceJobItem.STATUS_SKIPPED)
@@ -187,6 +267,13 @@ def execute_inference_job(job_id: int) -> None:
 
         # Whole-job wall-clock deadline.
         if job.deadline and timezone.now() > job.deadline:
+            logger.warning(
+                "Job %d: deadline %s exceeded (processed %d/%d)",
+                job_id,
+                job.deadline.isoformat(),
+                idx - 1,
+                item_count,
+            )
             job.items.filter(
                 status__in=[InferenceJobItem.STATUS_PENDING, InferenceJobItem.STATUS_FAILED]
             ).update(status=InferenceJobItem.STATUS_SKIPPED)
@@ -200,9 +287,26 @@ def execute_inference_job(job_id: int) -> None:
         item.save(update_fields=["status", "attempts", "started_at"])
         item.refresh_from_db(fields=["attempts"])
 
+        logger.info(
+            "Job %d: processing item %d/%d (item_id=%d image_id=%d)",
+            job_id,
+            idx,
+            item_count,
+            item.id,
+            item.image_id,
+        )
+
         try:
             _process_item(job, item)
         except Exception as exc:  # one item's failure must not abort the job
+            logger.error(
+                "Job %d item %d failed: image_id=%d error=%s",
+                job_id,
+                item.id,
+                item.image_id,
+                exc,
+                exc_info=True,
+            )
             item.status = InferenceJobItem.STATUS_FAILED
             item.error = str(exc)
             item.finished_at = timezone.now()
@@ -216,3 +320,12 @@ def execute_inference_job(job_id: int) -> None:
     job.error = error_message
     job.finished_at = timezone.now()
     job.save(update_fields=["status", "finished_at", "error"])
+
+    logger.info(
+        "Job %d finished: status=%s completed=%d failed=%d annotations=%d",
+        job_id,
+        final_status,
+        job.completed_items,
+        job.failed_items,
+        job.annotations_created,
+    )

@@ -76,10 +76,28 @@ class Image2DController:
     )
     def upload(self, request, project_id: int, file: File[UploadedFile]):
         project = get_object_or_404(Project, id=project_id)
+        # Read the pixel dimensions from the in-memory upload before saving, so
+        # the frontend renders annotations in the image's real coordinate space
+        # (and AI inference meta carries the correct width/height). PIL.open is
+        # lazy — it parses only the header, not the full image — and reading the
+        # already-uploaded bytes avoids an extra round-trip to storage. Without
+        # this, width/height stay null and the client falls back to a fake
+        # extent, misplacing/scaling annotations.
+        width = height = None
+        try:
+            with PILImage.open(file) as pil_img:
+                width, height = pil_img.size
+        except Exception:
+            pass  # non-image or unreadable header — leave dimensions null
+        finally:
+            file.seek(0)
+
         img = Image2D.objects.create(
             project=project,
             image=file,
             file_name=file.name,
+            width=width,
+            height=height,
         )
         return 201, Image2DOutput.from_image(img)
 

@@ -22,3 +22,9 @@ dependencies = [
 
 [tool.uv.sources]
 anno-sdk = { path = "../anno-sdk", editable = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-django>=4.12.0",
+]
