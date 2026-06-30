@@ -12,7 +12,7 @@ from anno_images.models import Image2D
 from anno_projects.models import Project
 from anno_projects.permissions import IsProjectMemberOrAdmin, IsProjectSupervisorOrAdmin
 
-from .models import ProjectTag, ImageTag
+from .models import ImageTag, ProjectTag
 from .schemas import (
     ImageTagApplyInput,
     ImageTagOutput,
@@ -22,7 +22,6 @@ from .schemas import (
     TagStatsOutput,
     TagUpdateInput,
 )
-
 
 # ---------------------------------------------------------------------------
 # Project tags (supervisor-managed, member-visible)
@@ -105,10 +104,13 @@ class TagController:
         project = get_object_or_404(Project, id=project_id)
         if not re.match(r"^[a-z0-9_]+$", payload.name):
             raise HttpError(
-                400, "Tag name must contain only lowercase letters, digits, and underscores."
+                400,
+                "Tag name must contain only lowercase letters, digits, and underscores.",
             )
         if ProjectTag.objects.filter(project=project, name=payload.name).exists():
-            raise HttpError(409, f"Tag '{payload.name}' already exists in this project.")
+            raise HttpError(
+                409, f"Tag '{payload.name}' already exists in this project."
+            )
         tag = ProjectTag.objects.create(
             project=project,
             name=payload.name,
@@ -151,9 +153,7 @@ class TagController:
 # ---------------------------------------------------------------------------
 
 
-@api_controller(
-    "/projects/{project_id}/images/{image_id}/tags", tags=["image-tags"]
-)
+@api_controller("/projects/{project_id}/images/{image_id}/tags", tags=["image-tags"])
 class ImageTagController:
 
     @http_get(
@@ -179,15 +179,11 @@ class ImageTagController:
         self, request, project_id: int, image_id: int, payload: ImageTagApplyInput
     ):
         img = get_object_or_404(Image2D, id=image_id, project_id=project_id)
-        tag = get_object_or_404(
-            ProjectTag, id=payload.tag_id, project_id=project_id
-        )
+        tag = get_object_or_404(ProjectTag, id=payload.tag_id, project_id=project_id)
         if not tag.is_active:
             raise HttpError(400, "Cannot apply an inactive tag.")
         if ImageTag.objects.filter(image=img, tag=tag).exists():
-            raise HttpError(
-                409, f"Tag '{tag.name}' is already applied to this image."
-            )
+            raise HttpError(409, f"Tag '{tag.name}' is already applied to this image.")
         image_tag = ImageTag.objects.create(
             image=img, tag=tag, applied_by=request.user, note=payload.note
         )
@@ -205,5 +201,13 @@ class ImageTagController:
     def remove(self, request, project_id: int, image_id: int, tag_id: int):
         img = get_object_or_404(Image2D, id=image_id, project_id=project_id)
         image_tag = get_object_or_404(ImageTag, image=img, tag_id=tag_id)
+
+        # Ownership check: workers can only remove their own tags.
+        # Supervisors and admins can remove any tag in the project.
+        role = img.project.get_user_role(request.user)
+        if role not in ("admin", "supervisor"):
+            if role != "worker" or image_tag.applied_by_id != request.user.id:
+                raise HttpError(403, "You can only remove tags you applied yourself.")
+
         image_tag.delete()
         return 204, None
