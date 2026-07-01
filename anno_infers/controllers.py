@@ -9,13 +9,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
-from ninja_extra import (
-    api_controller,
-    http_delete,
-    http_get,
-    http_patch,
-    http_post,
-)
+from ninja_extra import api_controller, http_delete, http_get, http_patch, http_post
 from ninja_extra.exceptions import HttpError
 from ninja_extra.permissions import AllowAny, IsAuthenticated
 from ninja_jwt.authentication import JWTAuth
@@ -46,7 +40,6 @@ from .schemas import (
 )
 from .services import create_ai_annotation, modify_ai_annotation
 from .tasks import run_inference_job
-
 
 # ---------------------------------------------------------------------------
 # Project inference endpoints (API-key auth; project implied by the key)
@@ -304,9 +297,7 @@ class InferenceProviderController:
         url_name="infer_provider_detail",
     )
     def detail(self, request, project_id: int, provider_id: int):
-        provider = get_object_or_404(
-            _visible_providers(project_id), id=provider_id
-        )
+        provider = get_object_or_404(_visible_providers(project_id), id=provider_id)
         return 200, ProviderOutput.from_provider(provider)
 
     @http_patch(
@@ -316,7 +307,9 @@ class InferenceProviderController:
         response={200: ProviderOutput},
         url_name="infer_provider_update",
     )
-    def update(self, request, project_id: int, provider_id: int, payload: ProviderUpdateInput):
+    def update(
+        self, request, project_id: int, provider_id: int, payload: ProviderUpdateInput
+    ):
         # Only project-scoped providers are editable here; globals are admin-managed.
         provider = get_object_or_404(
             InferenceServiceProvider, id=provider_id, project_id=project_id
@@ -359,9 +352,11 @@ class AutoAnnotateController:
     def start(self, request, project_id: int, payload: AutoAnnotateInput):
         project = get_object_or_404(Project, id=project_id)
 
-        provider = _visible_providers(project_id).filter(
-            id=payload.provider_id, is_active=True
-        ).first()
+        provider = (
+            _visible_providers(project_id)
+            .filter(id=payload.provider_id, is_active=True)
+            .first()
+        )
         if provider is None:
             raise HttpError(404, "Active provider not found for this project.")
 
@@ -465,7 +460,10 @@ class AutoAnnotateController:
 
         with transaction.atomic():
             reset = job.items.filter(
-                status__in=[InferenceJobItem.STATUS_FAILED, InferenceJobItem.STATUS_SKIPPED]
+                status__in=[
+                    InferenceJobItem.STATUS_FAILED,
+                    InferenceJobItem.STATUS_SKIPPED,
+                ]
             ).update(status=InferenceJobItem.STATUS_PENDING)
             job.failed_items = 0
             job.cancel_requested = False
