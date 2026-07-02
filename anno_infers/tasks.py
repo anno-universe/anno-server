@@ -1,14 +1,15 @@
 """Background worker for server-driven auto-annotation (Flow B).
 
-``run_inference_job`` is enqueued by the auto-annotate endpoint and executed by
+``run_inference_run`` is enqueued by the auto-annotate endpoints and executed by
 the ``db_worker`` process. For each pending image it sends the raw image bytes
 plus a JSON metadata block to the provider's inference URL, parses the response
 with the shared anno-sdk contract, validates the returned geometry against the
 provider's declared result types, and writes annotations through the existing
 ``create_ai_annotation`` write-path (which records an ``Operation``).
 
-Persistence, cooperative cancellation, the whole-job deadline and per-item
-replay all live in the job/item rows, so this worker is just a driver.
+Persistence, cooperative cancellation, the whole-run deadline and per-task
+replay all live in the run/task rows, so this worker is just a driver. A
+single-image inference is simply a run with one task and needs no special path.
 """
 
 from __future__ import annotations
@@ -25,10 +26,11 @@ from django.db.models import F
 from django.utils import timezone
 from django_tasks import task
 
+from anno_images.models import Operation
 from anno_images.schemas import Box2DDataInput, Keypoint2DDataInput, Polygon2DDataInput
 from anno_sdk import InferenceRequestMeta, InferenceResponse
 
-from .models import InferenceJob, InferenceJobItem
+from .models import InferenceResult, InferenceRun, InferenceTask
 from .services import create_ai_annotation
 
 logger = logging.getLogger(__name__)
@@ -82,11 +84,11 @@ def _call_provider(provider, image_bytes: bytes, file_name: str, meta: Inference
     data = {"metadata": json.dumps(meta.to_dict())}
 
     logger.debug(
-        "Calling provider %s at %s: image_id=%s job_id=%s timeout=%ds size=%d",
+        "Calling provider %s at %s: image_id=%s task_id=%s timeout=%ds size=%d",
         provider.name,
         provider.inference_url,
         meta.image_id,
-        meta.job_id,
+        meta.task_id,
         provider.timeout_seconds,
         len(image_bytes),
     )
@@ -109,21 +111,23 @@ def _call_provider(provider, image_bytes: bytes, file_name: str, meta: Inference
     return response
 
 
-def _process_item(job, item: InferenceJobItem) -> None:
+def _process_task(task: InferenceTask, *, provider, project, performed_by) -> None:
     """Run one image through the provider and persist its annotations.
 
-    Raises on any failure so the caller can mark the item failed; all DB writes
-    for the item are wrapped in a single atomic block.
+    ``provider``, ``project`` and ``performed_by`` are passed explicitly by the
+    caller (all carried on the run). For each returned candidate an
+    ``InferenceResult`` is recorded and then auto-committed. Raises on any
+    failure so the caller can mark the task failed; all DB writes for the task
+    are wrapped in a single atomic block.
     """
-    provider = job.provider
-    image = item.image
+    image = task.image
 
     logger.info(
-        "Processing item %d: image_id=%d file=%s (attempt %d)",
-        item.id,
+        "Processing task %d: image_id=%d file=%s (attempt %d)",
+        task.id,
         image.id,
         image.file_name,
-        item.attempts + 1,
+        task.attempts + 1,
     )
 
     with image.image.open("rb") as fh:
@@ -132,8 +136,8 @@ def _process_item(job, item: InferenceJobItem) -> None:
 
     meta = InferenceRequestMeta(
         image_id=image.id,
-        job_id=job.id,
-        label_mapping=job.project.label_mapping,
+        task_id=task.id,
+        label_mapping=project.label_mapping,
         requested_types=list(provider.supported_result_types),
         width=image.width,
         height=image.height,
@@ -144,188 +148,216 @@ def _process_item(job, item: InferenceJobItem) -> None:
     supported = set(provider.supported_result_types)
     created = 0
     with transaction.atomic():
-        for ann in response.annotations:
-            if ann.geometry.annotation_type not in supported:
+        for idx, ann in enumerate(response.annotations):
+            result_type = ann.geometry.annotation_type
+            if result_type not in supported:
                 logger.warning(
-                    "Item %d: provider returned unsupported type %r for image_id=%d, skipping",
-                    item.id,
-                    ann.geometry.annotation_type,
+                    "Task %d: provider returned unsupported type %r for image_id=%d, skipping",
+                    task.id,
+                    result_type,
                     image.id,
                 )
                 continue
-            create_ai_annotation(
+
+            result = InferenceResult.objects.create(
+                task=task,
+                result_index=idx,
+                result_type=result_type,
+                label=ann.label,
+                result_data=ann.geometry.to_dict(),
+                raw_result=ann.to_dict(),
+                status=InferenceResult.STATUS_PROPOSED,
+            )
+            annotation = create_ai_annotation(
                 image=image,
-                project=job.project,
-                performed_by=job.created_by,
+                project=project,
+                performed_by=performed_by,
+                source=Operation.SOURCE_INFERENCE,
                 **_annotation_to_kwargs(ann),
             )
+            result.annotation = annotation
+            result.status = InferenceResult.STATUS_COMMITTED
+            result.committed_at = timezone.now()
+            result.save(update_fields=["annotation", "status", "committed_at"])
             created += 1
 
-    item.annotations_created = created
-    item.status = InferenceJobItem.STATUS_DONE
-    item.error = ""
-    item.finished_at = timezone.now()
-    item.save(update_fields=["annotations_created", "status", "error", "finished_at"])
-
-    InferenceJob.objects.filter(pk=job.pk).update(
-        completed_items=F("completed_items") + 1,
-        annotations_created=F("annotations_created") + created,
-    )
+    task.annotations_created = created
+    task.status = InferenceTask.STATUS_DONE
+    task.error = ""
+    task.finished_at = timezone.now()
+    task.save(update_fields=["annotations_created", "status", "error", "finished_at"])
 
     logger.info(
-        "Item %d done: image_id=%d annotations_created=%d",
-        item.id,
+        "Task %d done: image_id=%d annotations_created=%d",
+        task.id,
         image.id,
         created,
     )
 
 
 @task()
-def run_inference_job(job_id: int) -> None:
-    """Task entrypoint enqueued by the auto-annotate endpoint / db_worker."""
-    execute_inference_job(job_id)
+def run_inference_run(run_id: int) -> None:
+    """Task entrypoint enqueued by the auto-annotate endpoints / db_worker."""
+    execute_inference_run(run_id)
 
 
-def execute_inference_job(job_id: int) -> None:
-    """Execute an auto-annotation job: one provider call per pending image.
+def execute_inference_run(run_id: int) -> None:
+    """Execute an auto-annotation run: one provider call per pending image.
 
+    Handles both batch runs and single-image runs (a run with one task).
     Plain function (no task wrapper) so it can be driven directly in tests.
     """
-    logger.info("Worker picked up job %d", job_id)
+    logger.info("Worker picked up inference run %d", run_id)
 
-    job = (
-        InferenceJob.objects.select_related("provider", "project", "created_by")
-        .filter(pk=job_id)
+    run = (
+        InferenceRun.objects.select_related("provider", "project", "created_by")
+        .filter(pk=run_id)
         .first()
     )
-    if job is None or job.status not in (
-        InferenceJob.STATUS_PENDING,
-        InferenceJob.STATUS_RUNNING,
+    if run is None or run.status not in (
+        InferenceRun.STATUS_PENDING,
+        InferenceRun.STATUS_RUNNING,
     ):
         logger.info(
-            "Job %d skipped: job=%s status=%s",
-            job_id,
-            "found" if job else "not_found",
-            job.status if job else "n/a",
+            "Inference run %d skipped: run=%s status=%s",
+            run_id,
+            "found" if run else "not_found",
+            run.status if run else "n/a",
         )
         return
 
     logger.info(
-        "Job %d starting: project=%s provider=%s total_items=%d",
-        job_id,
-        job.project.name,
-        job.provider.name,
-        job.total_items,
+        "Inference run %d starting: project=%s provider=%s total_items=%d",
+        run_id,
+        run.project.name,
+        run.provider.name,
+        run.total_items,
     )
 
-    job.status = InferenceJob.STATUS_RUNNING
-    job.started_at = job.started_at or timezone.now()
-    job.error = ""
+    run.status = InferenceRun.STATUS_RUNNING
+    run.started_at = run.started_at or timezone.now()
+    run.error = ""
 
     # Recompute deadline from *now* so it reflects actual processing time,
-    # not wall-clock time since job creation (worker may have been delayed).
-    job.deadline = timezone.now() + timedelta(
-        seconds=(job.total_items + 1) * job.provider.timeout_seconds
+    # not wall-clock time since run creation (worker may have been delayed).
+    run.deadline = timezone.now() + timedelta(
+        seconds=(run.total_items + 1) * run.provider.timeout_seconds
     )
-    job.save(update_fields=["status", "started_at", "error", "deadline"])
+    run.save(update_fields=["status", "started_at", "error", "deadline"])
 
     logger.info(
-        "Job %d deadline set to %s (%d items × %ds timeout)",
-        job_id,
-        job.deadline.isoformat(),
-        job.total_items,
-        job.provider.timeout_seconds,
+        "Inference run %d deadline set to %s (%d items × %ds timeout)",
+        run_id,
+        run.deadline.isoformat(),
+        run.total_items,
+        run.provider.timeout_seconds,
     )
 
-    items = (
-        job.items.filter(
-            status__in=[InferenceJobItem.STATUS_PENDING, InferenceJobItem.STATUS_FAILED]
+    tasks = (
+        run.tasks.filter(
+            status__in=[InferenceTask.STATUS_PENDING, InferenceTask.STATUS_FAILED]
         )
         .select_related("image")
         .order_by("id")
     )
 
-    item_count = len(items)
-    logger.info("Job %d: %d items to process", job_id, item_count)
+    task_count = len(tasks)
+    logger.info("Inference run %d: %d images to process", run_id, task_count)
 
-    final_status = InferenceJob.STATUS_COMPLETED
+    final_status = InferenceRun.STATUS_COMPLETED
     error_message = ""
-    for idx, item in enumerate(items, 1):
+    for idx, task in enumerate(tasks, 1):
         # Cooperative cancel: re-read the flag fresh each iteration.
-        if InferenceJob.objects.filter(pk=job.pk, cancel_requested=True).exists():
+        if InferenceRun.objects.filter(pk=run.pk, cancel_requested=True).exists():
             logger.info(
-                "Job %d: cancel requested, skipping remaining items (processed %d/%d)",
-                job_id,
+                "Inference run %d: cancel requested, skipping remaining images (processed %d/%d)",
+                run_id,
                 idx - 1,
-                item_count,
+                task_count,
             )
-            job.items.filter(
-                status__in=[InferenceJobItem.STATUS_PENDING, InferenceJobItem.STATUS_FAILED]
-            ).update(status=InferenceJobItem.STATUS_SKIPPED)
-            final_status = InferenceJob.STATUS_CANCELLED
+            run.tasks.filter(
+                status__in=[InferenceTask.STATUS_PENDING, InferenceTask.STATUS_FAILED]
+            ).update(status=InferenceTask.STATUS_SKIPPED)
+            final_status = InferenceRun.STATUS_CANCELLED
             break
 
-        # Whole-job wall-clock deadline.
-        if job.deadline and timezone.now() > job.deadline:
+        # Whole-run wall-clock deadline.
+        if run.deadline and timezone.now() > run.deadline:
             logger.warning(
-                "Job %d: deadline %s exceeded (processed %d/%d)",
-                job_id,
-                job.deadline.isoformat(),
+                "Inference run %d: deadline %s exceeded (processed %d/%d)",
+                run_id,
+                run.deadline.isoformat(),
                 idx - 1,
-                item_count,
+                task_count,
             )
-            job.items.filter(
-                status__in=[InferenceJobItem.STATUS_PENDING, InferenceJobItem.STATUS_FAILED]
-            ).update(status=InferenceJobItem.STATUS_SKIPPED)
-            final_status = InferenceJob.STATUS_FAILED
+            run.tasks.filter(
+                status__in=[InferenceTask.STATUS_PENDING, InferenceTask.STATUS_FAILED]
+            ).update(status=InferenceTask.STATUS_SKIPPED)
+            final_status = InferenceRun.STATUS_FAILED
             error_message = "deadline exceeded"
             break
 
-        item.status = InferenceJobItem.STATUS_RUNNING
-        item.attempts = F("attempts") + 1
-        item.started_at = timezone.now()
-        item.save(update_fields=["status", "attempts", "started_at"])
-        item.refresh_from_db(fields=["attempts"])
+        task.status = InferenceTask.STATUS_RUNNING
+        task.attempts = F("attempts") + 1
+        task.started_at = timezone.now()
+        task.save(update_fields=["status", "attempts", "started_at"])
+        task.refresh_from_db(fields=["attempts"])
 
         logger.info(
-            "Job %d: processing item %d/%d (item_id=%d image_id=%d)",
-            job_id,
+            "Inference run %d: processing image %d/%d (task_id=%d image_id=%d)",
+            run_id,
             idx,
-            item_count,
-            item.id,
-            item.image_id,
+            task_count,
+            task.id,
+            task.image_id,
         )
 
         try:
-            _process_item(job, item)
-        except Exception as exc:  # one item's failure must not abort the job
+            _process_task(
+                task,
+                provider=run.provider,
+                project=run.project,
+                performed_by=run.created_by,
+            )
+        except Exception as exc:  # one image's failure must not abort the run
             logger.error(
-                "Job %d item %d failed: image_id=%d error=%s",
-                job_id,
-                item.id,
-                item.image_id,
+                "Inference run %d task %d failed: image_id=%d error=%s",
+                run_id,
+                task.id,
+                task.image_id,
                 exc,
                 exc_info=True,
             )
-            item.status = InferenceJobItem.STATUS_FAILED
-            item.error = str(exc)
-            item.finished_at = timezone.now()
-            item.save(update_fields=["status", "error", "finished_at"])
-            InferenceJob.objects.filter(pk=job.pk).update(failed_items=F("failed_items") + 1)
+            task.status = InferenceTask.STATUS_FAILED
+            task.error = str(exc)
+            task.finished_at = timezone.now()
+            task.save(update_fields=["status", "error", "finished_at"])
+            InferenceRun.objects.filter(pk=run.pk).update(
+                failed_items=F("failed_items") + 1
+            )
+        else:
+            InferenceRun.objects.filter(pk=run.pk).update(
+                completed_items=F("completed_items") + 1,
+                annotations_created=F("annotations_created") + task.annotations_created,
+            )
 
-    job.refresh_from_db()
-    if final_status == InferenceJob.STATUS_COMPLETED and job.completed_items == 0 and job.failed_items > 0:
-        final_status = InferenceJob.STATUS_FAILED
-    job.status = final_status
-    job.error = error_message
-    job.finished_at = timezone.now()
-    job.save(update_fields=["status", "finished_at", "error"])
+    run.refresh_from_db()
+    if (
+        final_status == InferenceRun.STATUS_COMPLETED
+        and run.completed_items == 0
+        and run.failed_items > 0
+    ):
+        final_status = InferenceRun.STATUS_FAILED
+    run.status = final_status
+    run.error = error_message
+    run.finished_at = timezone.now()
+    run.save(update_fields=["status", "finished_at", "error"])
 
     logger.info(
-        "Job %d finished: status=%s completed=%d failed=%d annotations=%d",
-        job_id,
+        "Inference run %d finished: status=%s completed=%d failed=%d annotations=%d",
+        run_id,
         final_status,
-        job.completed_items,
-        job.failed_items,
-        job.annotations_created,
+        run.completed_items,
+        run.failed_items,
+        run.annotations_created,
     )

@@ -5,7 +5,7 @@ from ninja import Schema
 from pydantic import field_validator
 
 from anno_images.schemas import Box2DDataInput, Keypoint2DDataInput, Polygon2DDataInput
-from anno_infers.models import VALID_RESULT_TYPES
+from anno_infers.models import VALID_PROMPT_TYPES, VALID_RESULT_TYPES
 
 # ---------- Project meta ----------
 
@@ -262,8 +262,43 @@ class AutoAnnotateInput(Schema):
     provider_id: int
 
 
-class JobItemOutput(Schema):
+class ResultOutput(Schema):
+    """One candidate result the model returned for a single image."""
+
     id: int
+    result_index: int
+    result_type: str
+    label: int | None
+    score: float | None
+    result_data: dict
+    annotation_id: int | None
+    status: str
+    created_at: datetime
+    committed_at: datetime | None
+    rejected_at: datetime | None
+
+    @staticmethod
+    def from_result(r) -> "ResultOutput":
+        return ResultOutput(
+            id=r.id,
+            result_index=r.result_index,
+            result_type=r.result_type,
+            label=r.label,
+            score=r.score,
+            result_data=r.result_data,
+            annotation_id=r.annotation_id,
+            status=r.status,
+            created_at=r.created_at,
+            committed_at=r.committed_at,
+            rejected_at=r.rejected_at,
+        )
+
+
+class TaskOutput(Schema):
+    """One image's unit of work within a run."""
+
+    id: int
+    run_id: int
     image_id: int
     status: str
     annotations_created: int
@@ -271,22 +306,40 @@ class JobItemOutput(Schema):
     error: str
 
     @staticmethod
-    def from_item(item) -> "JobItemOutput":
-        return JobItemOutput(
-            id=item.id,
-            image_id=item.image_id,
-            status=item.status,
-            annotations_created=item.annotations_created,
-            attempts=item.attempts,
-            error=item.error,
+    def from_task(task) -> "TaskOutput":
+        return TaskOutput(
+            id=task.id,
+            run_id=task.run_id,
+            image_id=task.image_id,
+            status=task.status,
+            annotations_created=task.annotations_created,
+            attempts=task.attempts,
+            error=task.error,
         )
 
 
-class JobOutput(Schema):
+class TaskDetailOutput(TaskOutput):
+    """Per-image task with its candidate results."""
+
+    results: list[ResultOutput] = []
+
+    @staticmethod
+    def from_task_with_results(task) -> "TaskDetailOutput":
+        base = TaskOutput.from_task(task)
+        return TaskDetailOutput(
+            **base.dict(),
+            results=[ResultOutput.from_result(r) for r in task.results.all()],
+        )
+
+
+class RunOutput(Schema):
+    """A triggered auto-annotation run over a set of images (1..N)."""
+
     id: int
     project_id: int
     provider_id: int
     status: str
+    provider_snapshot: dict
     total_items: int
     completed_items: int
     failed_items: int
@@ -299,34 +352,35 @@ class JobOutput(Schema):
     finished_at: datetime | None
 
     @staticmethod
-    def from_job(job) -> "JobOutput":
-        return JobOutput(
-            id=job.id,
-            project_id=job.project_id,
-            provider_id=job.provider_id,
-            status=job.status,
-            total_items=job.total_items,
-            completed_items=job.completed_items,
-            failed_items=job.failed_items,
-            annotations_created=job.annotations_created,
-            cancel_requested=job.cancel_requested,
-            error=job.error,
-            created_by_id=job.created_by_id,
-            created_at=job.created_at,
-            started_at=job.started_at,
-            finished_at=job.finished_at,
+    def from_run(run) -> "RunOutput":
+        return RunOutput(
+            id=run.id,
+            project_id=run.project_id,
+            provider_id=run.provider_id,
+            status=run.status,
+            provider_snapshot=run.provider_snapshot,
+            total_items=run.total_items,
+            completed_items=run.completed_items,
+            failed_items=run.failed_items,
+            annotations_created=run.annotations_created,
+            cancel_requested=run.cancel_requested,
+            error=run.error,
+            created_by_id=run.created_by_id,
+            created_at=run.created_at,
+            started_at=run.started_at,
+            finished_at=run.finished_at,
         )
 
 
-class JobDetailOutput(JobOutput):
-    items: list[JobItemOutput] = []
+class RunDetailOutput(RunOutput):
+    tasks: list[TaskOutput] = []
 
     @staticmethod
-    def from_job_with_items(job) -> "JobDetailOutput":
-        base = JobOutput.from_job(job)
-        return JobDetailOutput(
+    def from_run_with_tasks(run) -> "RunDetailOutput":
+        base = RunOutput.from_run(run)
+        return RunDetailOutput(
             **base.dict(),
-            items=[JobItemOutput.from_item(i) for i in job.items.all()],
+            tasks=[TaskOutput.from_task(t) for t in run.tasks.all()],
         )
 
 
@@ -342,3 +396,214 @@ class ImageAutoAnnotateInput(Schema):
     """
 
     provider_id: int
+
+
+# ---------- Interactive inference providers ----------
+
+
+def _validate_prompt_types(value: list[str]) -> list[str]:
+    invalid = [t for t in value if t not in VALID_PROMPT_TYPES]
+    if invalid:
+        allowed = ", ".join(sorted(VALID_PROMPT_TYPES))
+        raise ValueError(f"Invalid prompt types {invalid}; allowed: {allowed}.")
+    return value
+
+
+class InteractiveProviderCreateInput(Schema):
+    name: str
+    inference_url: str
+    supported_prompt_types: list[str]
+    supported_result_types: list[str]
+    model_name: str = ""
+    description: str = ""
+    auth_type: str = "none"  # "none" | "header" | "query"
+    auth_param_name: str = ""
+    auth_secret: str = ""  # plaintext credential presented to the service
+    timeout_seconds: int = 60
+    is_active: bool = True
+
+    @field_validator("supported_prompt_types")
+    @classmethod
+    def _check_prompt_types(cls, v: list[str]) -> list[str]:
+        return _validate_prompt_types(v)
+
+    @field_validator("supported_result_types")
+    @classmethod
+    def _check_result_types(cls, v: list[str]) -> list[str]:
+        return _validate_result_types(v)
+
+    @field_validator("auth_type")
+    @classmethod
+    def _check_auth_type(cls, v: str) -> str:
+        if v not in ("none", "header", "query"):
+            raise ValueError("auth_type must be 'none', 'header' or 'query'.")
+        return v
+
+
+class InteractiveProviderUpdateInput(Schema):
+    """Partial update; all fields optional. ``auth_secret`` is write-only."""
+
+    name: str | None = None
+    inference_url: str | None = None
+    supported_prompt_types: list[str] | None = None
+    supported_result_types: list[str] | None = None
+    model_name: str | None = None
+    description: str | None = None
+    auth_type: str | None = None
+    auth_param_name: str | None = None
+    auth_secret: str | None = None
+    timeout_seconds: int | None = None
+    is_active: bool | None = None
+
+    @field_validator("supported_prompt_types")
+    @classmethod
+    def _check_prompt_types(cls, v: list[str] | None) -> list[str] | None:
+        return None if v is None else _validate_prompt_types(v)
+
+    @field_validator("supported_result_types")
+    @classmethod
+    def _check_result_types(cls, v: list[str] | None) -> list[str] | None:
+        return None if v is None else _validate_result_types(v)
+
+    @field_validator("auth_type")
+    @classmethod
+    def _check_auth_type(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("none", "header", "query"):
+            raise ValueError("auth_type must be 'none', 'header' or 'query'.")
+        return v
+
+
+class InteractiveProviderOutput(Schema):
+    """Interactive provider representation; omits ``auth_secret`` like ``ProviderOutput``."""
+
+    id: int
+    name: str
+    model_name: str
+    description: str
+    inference_url: str
+    supported_prompt_types: list[str]
+    supported_result_types: list[str]
+    auth_type: str
+    auth_param_name: str
+    has_auth_secret: bool
+    timeout_seconds: int
+    is_active: bool
+    is_global: bool
+    created_at: datetime
+    updated_at: datetime
+
+    @staticmethod
+    def from_provider(p) -> "InteractiveProviderOutput":
+        return InteractiveProviderOutput(
+            id=p.id,
+            name=p.name,
+            model_name=p.model_name,
+            description=p.description,
+            inference_url=p.inference_url,
+            supported_prompt_types=p.supported_prompt_types,
+            supported_result_types=p.supported_result_types,
+            auth_type=p.auth_type,
+            auth_param_name=p.auth_param_name,
+            has_auth_secret=bool(p.auth_secret),
+            timeout_seconds=p.timeout_seconds,
+            is_active=p.is_active,
+            is_global=p.project_id is None,
+            created_at=p.created_at,
+            updated_at=p.updated_at,
+        )
+
+
+# ---------- Interactive inference sessions ----------
+
+
+class InteractiveSessionStartInput(Schema):
+    """Open an interactive session on an image (image_id comes from the URL)."""
+
+    provider_id: int
+    from_annotation_id: int | None = None
+
+
+class InteractiveStepInput(Schema):
+    """Submit a set of prompts for the next step.
+
+    Each prompt is an open dict tagged with ``type`` (box / positive_point /
+    negative_point / mask / text) plus prompt-specific keys.
+    """
+
+    prompts: list[dict]
+
+
+class InteractiveCommitInput(Schema):
+    """Commit a chosen step's candidate as a real annotation."""
+
+    step_id: int
+
+
+class InteractiveStepOutput(Schema):
+    id: int
+    session_id: int
+    step_index: int
+    prompt: dict
+    result: dict
+    result_type: str
+    result_data: dict
+    error: str
+    created_at: datetime
+
+    @staticmethod
+    def from_operation(op) -> "InteractiveStepOutput":
+        return InteractiveStepOutput(
+            id=op.id,
+            session_id=op.session_id,
+            step_index=op.step_index,
+            prompt=op.prompt,
+            result=op.result,
+            result_type=op.result_type,
+            result_data=op.result_data,
+            error=op.error,
+            created_at=op.created_at,
+        )
+
+
+class InteractiveSessionOutput(Schema):
+    id: int
+    project_id: int
+    image_id: int
+    provider_id: int
+    performed_by_id: int
+    from_annotation_id: int | None
+    final_annotation_id: int | None
+    status: str
+    error: str
+    created_at: datetime
+    committed_at: datetime | None
+    discarded_at: datetime | None
+
+    @staticmethod
+    def from_session(s) -> "InteractiveSessionOutput":
+        return InteractiveSessionOutput(
+            id=s.id,
+            project_id=s.project_id,
+            image_id=s.image_id,
+            provider_id=s.provider_id,
+            performed_by_id=s.performed_by_id,
+            from_annotation_id=s.from_annotation_id,
+            final_annotation_id=s.final_annotation_id,
+            status=s.status,
+            error=s.error,
+            created_at=s.created_at,
+            committed_at=s.committed_at,
+            discarded_at=s.discarded_at,
+        )
+
+
+class InteractiveSessionDetailOutput(InteractiveSessionOutput):
+    steps: list[InteractiveStepOutput] = []
+
+    @staticmethod
+    def from_session_with_steps(s) -> "InteractiveSessionDetailOutput":
+        base = InteractiveSessionOutput.from_session(s)
+        return InteractiveSessionDetailOutput(
+            **base.dict(),
+            steps=[InteractiveStepOutput.from_operation(op) for op in s.operations.all()],
+        )

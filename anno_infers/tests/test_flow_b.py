@@ -18,11 +18,12 @@ from anno_sdk import Annotation, Box2D, InferenceResponse, Polygon2D
 from ninja_jwt.tokens import RefreshToken
 
 from anno_infers.models import (
-    InferenceJob,
-    InferenceJobItem,
+    InferenceResult,
+    InferenceRun,
     InferenceServiceProvider,
+    InferenceTask,
 )
-from anno_infers.tasks import execute_inference_job
+from anno_infers.tasks import execute_inference_run
 
 User = get_user_model()
 
@@ -196,7 +197,7 @@ class ProviderRegistryTests(FlowBBaseTest):
 
 
 # ---------------------------------------------------------------------------
-# Auto-annotate endpoint (job creation; worker not run)
+# Auto-annotate endpoint (batch job creation; worker not run)
 # ---------------------------------------------------------------------------
 
 
@@ -212,7 +213,7 @@ class AutoAnnotateStartTests(FlowBBaseTest):
         )
         self.assertEqual(res.status_code, 403)
 
-    def test_start_creates_job_and_items(self):
+    def test_start_creates_run_and_tasks(self):
         prov = self._make_provider(project=self.project)
         img1 = self._make_image(self.project, "a.png")
         img2 = self._make_image(self.project, "b.png")
@@ -226,9 +227,12 @@ class AutoAnnotateStartTests(FlowBBaseTest):
         body = res.json()
         self.assertEqual(body["status"], "pending")
         self.assertEqual(body["total_items"], 2)
-        job = InferenceJob.objects.get(id=body["id"])
+        # provider_snapshot is recorded and never carries the secret.
+        self.assertEqual(body["provider_snapshot"]["id"], prov.id)
+        self.assertNotIn("auth_secret", body["provider_snapshot"])
+        run = InferenceRun.objects.get(id=body["id"])
         self.assertEqual(
-            set(job.items.values_list("image_id", flat=True)), {img1.id, img2.id}
+            set(run.tasks.values_list("image_id", flat=True)), {img1.id, img2.id}
         )
 
     def test_start_includes_all_images(self):
@@ -246,9 +250,9 @@ class AutoAnnotateStartTests(FlowBBaseTest):
             headers=_auth(self.supervisor),
         )
         self.assertEqual(res.status_code, 201)
-        job = InferenceJob.objects.get(id=res.json()["id"])
+        run = InferenceRun.objects.get(id=res.json()["id"])
         self.assertEqual(
-            set(job.items.values_list("image_id", flat=True)),
+            set(run.tasks.values_list("image_id", flat=True)),
             {annotated.id, fresh.id},
         )
 
@@ -275,25 +279,25 @@ class AutoAnnotateStartTests(FlowBBaseTest):
 
 
 # ---------------------------------------------------------------------------
-# Worker (execute_inference_job, provider HTTP mocked)
+# Worker (execute_inference_run, provider HTTP mocked)
 # ---------------------------------------------------------------------------
 
 
 class WorkerTests(FlowBBaseTest):
-    def _make_job(self, provider, images):
-        job = InferenceJob.objects.create(
+    def _make_run(self, provider, images):
+        run = InferenceRun.objects.create(
             project=self.project, provider=provider, created_by=self.supervisor,
             total_items=len(images),
         )
-        InferenceJobItem.objects.bulk_create(
-            [InferenceJobItem(job=job, image=img) for img in images]
+        InferenceTask.objects.bulk_create(
+            [InferenceTask(run=run, image=img) for img in images]
         )
-        return job
+        return run
 
     def test_worker_writes_annotations(self):
         prov = self._make_provider(project=self.project, types=("box", "polygon"))
         img = self._make_image(self.project)
-        job = self._make_job(prov, [img])
+        run = self._make_run(prov, [img])
 
         payload = InferenceResponse(
             annotations=[
@@ -303,22 +307,35 @@ class WorkerTests(FlowBBaseTest):
         ).to_dict()
 
         with patch("anno_infers.tasks.httpx.post", return_value=_fake_response(payload)):
-            execute_inference_job(job.id)
+            execute_inference_run(run.id)
 
-        job.refresh_from_db()
-        self.assertEqual(job.status, "completed")
-        self.assertEqual(job.completed_items, 1)
-        self.assertEqual(job.annotations_created, 2)
+        run.refresh_from_db()
+        self.assertEqual(run.status, "completed")
+        self.assertEqual(run.completed_items, 1)
+        self.assertEqual(run.annotations_created, 2)
         self.assertEqual(Annotation2D.objects.filter(image=img).count(), 2)
-        self.assertEqual(Operation.objects.filter(image=img, action="add").count(), 2)
-        item = job.items.get()
-        self.assertEqual(item.status, "done")
-        self.assertEqual(item.attempts, 1)
+        # Every operation is tagged with source="inference".
+        add_ops = Operation.objects.filter(image=img, action="add")
+        self.assertEqual(add_ops.count(), 2)
+        self.assertTrue(all(op.source == "inference" for op in add_ops))
+        # Each candidate is recorded as a committed InferenceResult linked to
+        # the annotation it became (the reverse-lookup path).
+        task = run.tasks.get()
+        results = list(task.results.all())
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(r.status == "committed" for r in results))
+        self.assertTrue(all(r.annotation_id is not None for r in results))
+        for op in add_ops:
+            self.assertTrue(
+                InferenceResult.objects.filter(annotation_id=op.to_annotation_id).exists()
+            )
+        self.assertEqual(task.status, "done")
+        self.assertEqual(task.attempts, 1)
 
     def test_worker_drops_unsupported_type(self):
         prov = self._make_provider(project=self.project, types=("box",))
         img = self._make_image(self.project)
-        job = self._make_job(prov, [img])
+        run = self._make_run(prov, [img])
 
         payload = InferenceResponse(
             annotations=[
@@ -328,18 +345,20 @@ class WorkerTests(FlowBBaseTest):
         ).to_dict()
 
         with patch("anno_infers.tasks.httpx.post", return_value=_fake_response(payload)):
-            execute_inference_job(job.id)
+            execute_inference_run(run.id)
 
         self.assertEqual(Annotation2D.objects.filter(image=img).count(), 1)
         self.assertEqual(
             Annotation2D.objects.get(image=img).annotation_type, "box"
         )
+        # Only the supported candidate is recorded as a result.
+        self.assertEqual(InferenceResult.objects.filter(task__run=run).count(), 1)
 
-    def test_worker_per_item_failure_isolated(self):
+    def test_worker_per_task_failure_isolated(self):
         prov = self._make_provider(project=self.project, types=("box",))
         img1 = self._make_image(self.project, "a.png")
         img2 = self._make_image(self.project, "b.png")
-        job = self._make_job(prov, [img1, img2])
+        run = self._make_run(prov, [img1, img2])
 
         ok = _fake_response(
             InferenceResponse(
@@ -351,43 +370,43 @@ class WorkerTests(FlowBBaseTest):
             "anno_infers.tasks.httpx.post",
             side_effect=[RuntimeError("boom"), ok],
         ):
-            execute_inference_job(job.id)
+            execute_inference_run(run.id)
 
-        job.refresh_from_db()
-        self.assertEqual(job.status, "completed")
-        self.assertEqual(job.completed_items, 1)
-        self.assertEqual(job.failed_items, 1)
-        statuses = dict(job.items.values_list("image_id", "status"))
+        run.refresh_from_db()
+        self.assertEqual(run.status, "completed")
+        self.assertEqual(run.completed_items, 1)
+        self.assertEqual(run.failed_items, 1)
+        statuses = dict(run.tasks.values_list("image_id", "status"))
         self.assertEqual(statuses[img1.id], "failed")
         self.assertEqual(statuses[img2.id], "done")
-        self.assertIn("boom", job.items.get(image_id=img1.id).error)
+        self.assertIn("boom", run.tasks.get(image_id=img1.id).error)
 
-    def test_worker_all_failed_marks_job_failed(self):
+    def test_worker_all_failed_marks_run_failed(self):
         prov = self._make_provider(project=self.project, types=("box",))
         img = self._make_image(self.project)
-        job = self._make_job(prov, [img])
+        run = self._make_run(prov, [img])
         with patch("anno_infers.tasks.httpx.post", side_effect=RuntimeError("nope")):
-            execute_inference_job(job.id)
-        job.refresh_from_db()
-        self.assertEqual(job.status, "failed")
-        self.assertEqual(job.failed_items, 1)
+            execute_inference_run(run.id)
+        run.refresh_from_db()
+        self.assertEqual(run.status, "failed")
+        self.assertEqual(run.failed_items, 1)
 
     def test_worker_cancel_skips_remaining(self):
         prov = self._make_provider(project=self.project, types=("box",))
         img1 = self._make_image(self.project, "a.png")
         img2 = self._make_image(self.project, "b.png")
-        job = self._make_job(prov, [img1, img2])
-        job.cancel_requested = True
-        job.save(update_fields=["cancel_requested"])
+        run = self._make_run(prov, [img1, img2])
+        run.cancel_requested = True
+        run.save(update_fields=["cancel_requested"])
 
         with patch("anno_infers.tasks.httpx.post") as mock_post:
-            execute_inference_job(job.id)
+            execute_inference_run(run.id)
             mock_post.assert_not_called()
 
-        job.refresh_from_db()
-        self.assertEqual(job.status, "cancelled")
+        run.refresh_from_db()
+        self.assertEqual(run.status, "cancelled")
         self.assertTrue(
-            all(s == "skipped" for s in job.items.values_list("status", flat=True))
+            all(s == "skipped" for s in run.tasks.values_list("status", flat=True))
         )
         self.assertEqual(Annotation2D.objects.filter(project=self.project).count(), 0)
 
@@ -400,13 +419,13 @@ class WorkerTests(FlowBBaseTest):
             auth_secret="topsecret",
         )
         img = self._make_image(self.project)
-        job = self._make_job(prov, [img])
+        run = self._make_run(prov, [img])
         payload = InferenceResponse(annotations=[]).to_dict()
 
         with patch(
             "anno_infers.tasks.httpx.post", return_value=_fake_response(payload)
         ) as mock_post:
-            execute_inference_job(job.id)
+            execute_inference_run(run.id)
 
         _, kwargs = mock_post.call_args
         self.assertEqual(kwargs["headers"]["X-API-Key"], "topsecret")
@@ -425,9 +444,9 @@ class WorkerTests(FlowBBaseTest):
 
         prov = self._make_provider(project=self.project, types=("box",))
         img = self._make_image(self.project)
-        job = self._make_job(prov, [img])
-        job.deadline = timezone.now() - timedelta(seconds=3600)  # expired an hour ago
-        job.save(update_fields=["deadline"])
+        run = self._make_run(prov, [img])
+        run.deadline = timezone.now() - timedelta(seconds=3600)  # expired an hour ago
+        run.save(update_fields=["deadline"])
 
         payload = InferenceResponse(
             annotations=[Annotation(label=0, geometry=Box2D(0, 0, 1, 1))]
@@ -436,13 +455,13 @@ class WorkerTests(FlowBBaseTest):
         with patch(
             "anno_infers.tasks.httpx.post", return_value=_fake_response(payload)
         ):
-            execute_inference_job(job.id)
+            execute_inference_run(run.id)
 
-        job.refresh_from_db()
+        run.refresh_from_db()
         # Deadline was recomputed, so processing succeeded.
-        self.assertEqual(job.status, "completed")
-        self.assertEqual(job.completed_items, 1)
-        self.assertEqual(job.items.get().status, "done")
+        self.assertEqual(run.status, "completed")
+        self.assertEqual(run.completed_items, 1)
+        self.assertEqual(run.tasks.get().status, "done")
 
     def test_worker_query_auth(self):
         prov = self._make_provider(
@@ -453,12 +472,12 @@ class WorkerTests(FlowBBaseTest):
             auth_secret="qsecret",
         )
         img = self._make_image(self.project)
-        job = self._make_job(prov, [img])
+        run = self._make_run(prov, [img])
         with patch(
             "anno_infers.tasks.httpx.post",
             return_value=_fake_response(InferenceResponse(annotations=[]).to_dict()),
         ) as mock_post:
-            execute_inference_job(job.id)
+            execute_inference_run(run.id)
         _, kwargs = mock_post.call_args
         self.assertEqual(kwargs["params"], {"api_key": "qsecret"})
         self.assertEqual(kwargs["headers"], {})
@@ -470,62 +489,181 @@ class WorkerTests(FlowBBaseTest):
 
 
 class CancelRetryTests(FlowBBaseTest):
-    def _job(self):
+    def _run(self):
         prov = self._make_provider(project=self.project)
         img = self._make_image(self.project)
-        job = InferenceJob.objects.create(
+        run = InferenceRun.objects.create(
             project=self.project, provider=prov, created_by=self.supervisor,
             total_items=1, status="running",
         )
-        item = InferenceJobItem.objects.create(job=job, image=img)
-        return job, item
+        task = InferenceTask.objects.create(run=run, image=img)
+        return run, task
 
     def test_cancel_sets_flag(self):
-        job, _ = self._job()
+        run, _ = self._run()
         res = self.client.post(
-            f"/api/projects/{self.project.id}/auto-annotate/jobs/{job.id}/cancel",
+            f"/api/projects/{self.project.id}/auto-annotate/runs/{run.id}/cancel",
             headers=_auth(self.supervisor),
         )
         self.assertEqual(res.status_code, 200)
-        job.refresh_from_db()
-        self.assertTrue(job.cancel_requested)
-        self.assertEqual(job.status, "cancelling")
+        run.refresh_from_db()
+        self.assertTrue(run.cancel_requested)
+        self.assertEqual(run.status, "cancelling")
 
     def test_cancel_requires_supervisor(self):
-        job, _ = self._job()
+        run, _ = self._run()
         res = self.client.post(
-            f"/api/projects/{self.project.id}/auto-annotate/jobs/{job.id}/cancel",
+            f"/api/projects/{self.project.id}/auto-annotate/runs/{run.id}/cancel",
             headers=_auth(self.worker),
         )
         self.assertEqual(res.status_code, 403)
 
-    def test_retry_resets_failed_items(self):
-        job, item = self._job()
-        job.status = "failed"
-        job.failed_items = 1
-        job.save(update_fields=["status", "failed_items"])
-        item.status = "failed"
-        item.error = "x"
-        item.save(update_fields=["status", "error"])
+    def test_retry_resets_failed_tasks(self):
+        run, task = self._run()
+        run.status = "failed"
+        run.failed_items = 1
+        run.save(update_fields=["status", "failed_items"])
+        task.status = "failed"
+        task.error = "x"
+        task.save(update_fields=["status", "error"])
 
         res = self.client.post(
-            f"/api/projects/{self.project.id}/auto-annotate/jobs/{job.id}/retry",
+            f"/api/projects/{self.project.id}/auto-annotate/runs/{run.id}/retry",
             headers=_auth(self.supervisor),
         )
         self.assertEqual(res.status_code, 200)
-        job.refresh_from_db()
-        item.refresh_from_db()
-        self.assertEqual(job.status, "pending")
-        self.assertEqual(job.failed_items, 0)
-        self.assertEqual(item.status, "pending")
+        run.refresh_from_db()
+        task.refresh_from_db()
+        self.assertEqual(run.status, "pending")
+        self.assertEqual(run.failed_items, 0)
+        self.assertEqual(task.status, "pending")
 
-    def test_job_detail_lists_items(self):
-        job, item = self._job()
+    def test_run_detail_lists_tasks(self):
+        run, task = self._run()
         res = self.client.get(
-            f"/api/projects/{self.project.id}/auto-annotate/jobs/{job.id}",
+            f"/api/projects/{self.project.id}/auto-annotate/runs/{run.id}",
             headers=_auth(self.worker),
         )
         self.assertEqual(res.status_code, 200)
         body = res.json()
-        self.assertEqual(len(body["items"]), 1)
-        self.assertEqual(body["items"][0]["image_id"], item.image_id)
+        self.assertEqual(len(body["tasks"]), 1)
+        self.assertEqual(body["tasks"][0]["image_id"], task.image_id)
+
+
+# ---------------------------------------------------------------------------
+# Single-image inference (a run with one task)
+# ---------------------------------------------------------------------------
+
+
+class SingleImageRunTests(FlowBBaseTest):
+    def test_single_image_creates_run_with_one_task(self):
+        """Single-image endpoint creates an InferenceRun with one InferenceTask."""
+        prov = self._make_provider(project=self.project)
+        img = self._make_image(self.project)
+        res = self.client.post(
+            f"/api/projects/{self.project.id}/images/{img.id}/auto-annotate/",
+            data=json.dumps({"provider_id": prov.id}),
+            content_type="application/json",
+            headers=_auth(self.worker),
+        )
+        self.assertEqual(res.status_code, 201, res.content)
+        body = res.json()
+        self.assertEqual(body["provider_id"], prov.id)
+        self.assertEqual(body["total_items"], 1)
+        self.assertEqual(body["status"], "pending")
+
+        run = InferenceRun.objects.get(id=body["id"])
+        self.assertEqual(run.provider_id, prov.id)
+        self.assertEqual(run.created_by_id, self.worker.id)
+        task = run.tasks.get()
+        self.assertEqual(task.image_id, img.id)
+
+    def test_single_image_run_detail_and_task_results(self):
+        prov = self._make_provider(project=self.project)
+        img = self._make_image(self.project)
+        run = InferenceRun.objects.create(
+            project=self.project, provider=prov, created_by=self.worker,
+            total_items=1,
+        )
+        task = InferenceTask.objects.create(run=run, image=img)
+
+        payload = InferenceResponse(
+            annotations=[Annotation(label=0, geometry=Box2D(0, 0, 1, 1))]
+        ).to_dict()
+
+        with patch("anno_infers.tasks.httpx.post", return_value=_fake_response(payload)):
+            execute_inference_run(run.id)
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, "done")
+        self.assertEqual(task.annotations_created, 1)
+
+        # GET run detail via the single-image endpoint lists the one task.
+        res = self.client.get(
+            f"/api/projects/{self.project.id}/images/{img.id}/auto-annotate/runs/{run.id}",
+            headers=_auth(self.worker),
+        )
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertEqual(len(body["tasks"]), 1)
+        self.assertEqual(body["tasks"][0]["id"], task.id)
+
+        # GET task detail carries the candidate results.
+        res = self.client.get(
+            f"/api/projects/{self.project.id}/auto-annotate/runs/{run.id}/tasks/{task.id}",
+            headers=_auth(self.worker),
+        )
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertEqual(body["run_id"], run.id)
+        self.assertEqual(len(body["results"]), 1)
+        self.assertEqual(body["results"][0]["status"], "committed")
+        self.assertEqual(body["results"][0]["result_type"], "box")
+        self.assertIsNotNone(body["results"][0]["annotation_id"])
+
+    def test_task_detail_endpoint(self):
+        """GET /runs/{run_id}/tasks/{task_id} shows single-task results."""
+        prov = self._make_provider(project=self.project)
+        img = self._make_image(self.project)
+        run = InferenceRun.objects.create(
+            project=self.project, provider=prov, created_by=self.worker,
+            total_items=1, status="running",
+        )
+        task = InferenceTask.objects.create(run=run, image=img)
+
+        res = self.client.get(
+            f"/api/projects/{self.project.id}/auto-annotate/runs/{run.id}"
+            f"/tasks/{task.id}",
+            headers=_auth(self.worker),
+        )
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertEqual(body["run_id"], run.id)
+        self.assertEqual(body["image_id"], img.id)
+        self.assertEqual(body["results"], [])
+
+    def test_single_image_worker_writes_annotations(self):
+        """A single-image run processes the image exactly like a batch run."""
+        prov = self._make_provider(project=self.project, types=("polygon",))
+        img = self._make_image(self.project)
+        run = InferenceRun.objects.create(
+            project=self.project, provider=prov, created_by=self.worker,
+            total_items=1,
+        )
+        task = InferenceTask.objects.create(run=run, image=img)
+
+        payload = InferenceResponse(
+            annotations=[Annotation(label=0, geometry=Polygon2D([[0, 0], [1, 1], [2, 0]]))]
+        ).to_dict()
+
+        with patch("anno_infers.tasks.httpx.post", return_value=_fake_response(payload)):
+            execute_inference_run(run.id)
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, "done")
+        self.assertEqual(Annotation2D.objects.filter(image=img).count(), 1)
+        op = Operation.objects.get(image=img)
+        self.assertEqual(op.source, "inference")
+        # Reverse lookup works: the result links one-to-one to the annotation.
+        result = InferenceResult.objects.get(task=task)
+        self.assertEqual(result.annotation, op.to_annotation)

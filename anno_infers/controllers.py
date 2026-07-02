@@ -21,12 +21,25 @@ from anno_projects.models import Project
 from anno_projects.permissions import IsProjectMemberOrAdmin, IsProjectSupervisorOrAdmin
 
 from .auth import ProjectAPIKeyAuth
-from .models import InferenceJob, InferenceJobItem, InferenceServiceProvider
+from .models import (
+    InferenceRun,
+    InferenceServiceProvider,
+    InferenceTask,
+    InteractiveInferenceServiceProvider,
+    InteractiveInferenceSession,
+)
 from .schemas import (
     AutoAnnotateInput,
     ImageAutoAnnotateInput,
-    JobDetailOutput,
-    JobOutput,
+    InteractiveCommitInput,
+    InteractiveProviderCreateInput,
+    InteractiveProviderOutput,
+    InteractiveProviderUpdateInput,
+    InteractiveSessionDetailOutput,
+    InteractiveSessionOutput,
+    InteractiveSessionStartInput,
+    InteractiveStepInput,
+    InteractiveStepOutput,
     ProjectAnnotationBatchOutput,
     ProjectAnnotationModifyOutput,
     ProjectAnnotationResultItem,
@@ -37,9 +50,20 @@ from .schemas import (
     ProviderCreateInput,
     ProviderOutput,
     ProviderUpdateInput,
+    RunDetailOutput,
+    RunOutput,
+    TaskDetailOutput,
 )
-from .services import create_ai_annotation, modify_ai_annotation
-from .tasks import run_inference_job
+from .services import (
+    commit_interactive_session,
+    create_ai_annotation,
+    discard_interactive_session,
+    modify_ai_annotation,
+    provider_snapshot,
+    run_interactive_step,
+    start_interactive_session,
+)
+from .tasks import run_inference_run
 
 # ---------------------------------------------------------------------------
 # Project inference endpoints (API-key auth; project implied by the key)
@@ -346,7 +370,7 @@ class AutoAnnotateController:
         "/",
         permissions=[IsAuthenticated, IsProjectSupervisorOrAdmin],
         auth=JWTAuth(),
-        response={201: JobOutput},
+        response={201: RunOutput},
         url_name="infer_auto_annotate",
     )
     def start(self, request, project_id: int, payload: AutoAnnotateInput):
@@ -369,111 +393,129 @@ class AutoAnnotateController:
         if not image_ids:
             raise HttpError(400, "No images in project.")
 
-        # Bound the whole job: time for each image plus a small buffer.
+        # Bound the whole run: time for each image plus a small buffer.
         deadline = timezone.now() + timedelta(
             seconds=(len(image_ids) + 1) * provider.timeout_seconds
         )
 
         logger.info(
-            "Creating auto-annotation job: project_id=%d provider_id=%d image_count=%d",
+            "Creating auto-annotation run: project_id=%d provider_id=%d image_count=%d",
             project.id,
             provider.id,
             len(image_ids),
         )
         with transaction.atomic():
-            job = InferenceJob.objects.create(
+            run = InferenceRun.objects.create(
                 project=project,
                 provider=provider,
                 created_by=request.user,
                 total_items=len(image_ids),
                 deadline=deadline,
+                provider_snapshot=provider_snapshot(provider),
             )
-            InferenceJobItem.objects.bulk_create(
-                [InferenceJobItem(job=job, image_id=iid) for iid in image_ids]
+            InferenceTask.objects.bulk_create(
+                [InferenceTask(run=run, image_id=iid) for iid in image_ids]
             )
-            transaction.on_commit(lambda: run_inference_job.enqueue(job.id))
+            transaction.on_commit(lambda: run_inference_run.enqueue(run.id))
 
         logger.info(
-            "Auto-annotation job %d created and task enqueued: %d items, deadline=%s",
-            job.id,
+            "Auto-annotation run %d created and task enqueued: %d items, deadline=%s",
+            run.id,
             len(image_ids),
             deadline.isoformat(),
         )
-        return 201, JobOutput.from_job(job)
+        return 201, RunOutput.from_run(run)
 
     @http_get(
-        "/jobs",
+        "/runs",
         permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
         auth=JWTAuth(),
-        response={200: PaginatedResponse[JobOutput]},
-        url_name="infer_auto_job_list",
+        response={200: PaginatedResponse[RunOutput]},
+        url_name="infer_auto_run_list",
     )
-    def list_jobs(self, request, project_id: int, limit: int = 100, offset: int = 0):
-        qs = InferenceJob.objects.filter(project_id=project_id).order_by("-created_at")
+    def list_runs(self, request, project_id: int, limit: int = 100, offset: int = 0):
+        qs = InferenceRun.objects.filter(project_id=project_id).order_by("-created_at")
         count, limit, offset, rows = paginate_queryset(qs, limit, offset)
         return 200, PaginatedResponse(
             count=count,
             limit=limit,
             offset=offset,
-            items=[JobOutput.from_job(j) for j in rows],
+            items=[RunOutput.from_run(r) for r in rows],
         )
 
     @http_get(
-        "/jobs/{job_id}",
+        "/runs/{run_id}",
         permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
         auth=JWTAuth(),
-        response={200: JobDetailOutput},
-        url_name="infer_auto_job_detail",
+        response={200: RunDetailOutput},
+        url_name="infer_auto_run_detail",
     )
-    def job_detail(self, request, project_id: int, job_id: int):
-        job = get_object_or_404(
-            InferenceJob.objects.prefetch_related("items"),
-            id=job_id,
+    def run_detail(self, request, project_id: int, run_id: int):
+        run = get_object_or_404(
+            InferenceRun.objects.prefetch_related("tasks"),
+            id=run_id,
             project_id=project_id,
         )
-        return 200, JobDetailOutput.from_job_with_items(job)
+        return 200, RunDetailOutput.from_run_with_tasks(run)
+
+    @http_get(
+        "/runs/{run_id}/tasks/{task_id}",
+        permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
+        auth=JWTAuth(),
+        response={200: TaskDetailOutput},
+        url_name="infer_auto_task_detail",
+    )
+    def task_detail(self, request, project_id: int, run_id: int, task_id: int):
+        """Single-image ``InferenceTask`` detail with candidate results."""
+        task = get_object_or_404(
+            InferenceTask.objects.prefetch_related("results"),
+            id=task_id,
+            run_id=run_id,
+            run__project_id=project_id,
+        )
+        return 200, TaskDetailOutput.from_task_with_results(task)
 
     @http_post(
-        "/jobs/{job_id}/cancel",
+        "/runs/{run_id}/cancel",
         permissions=[IsAuthenticated, IsProjectSupervisorOrAdmin],
         auth=JWTAuth(),
-        response={200: JobOutput},
-        url_name="infer_auto_job_cancel",
+        response={200: RunOutput},
+        url_name="infer_auto_run_cancel",
     )
-    def cancel(self, request, project_id: int, job_id: int):
-        job = get_object_or_404(InferenceJob, id=job_id, project_id=project_id)
-        job.cancel_requested = True
-        if job.status in (InferenceJob.STATUS_PENDING, InferenceJob.STATUS_RUNNING):
-            job.status = InferenceJob.STATUS_CANCELLING
-        job.save(update_fields=["cancel_requested", "status"])
-        return 200, JobOutput.from_job(job)
+    def cancel(self, request, project_id: int, run_id: int):
+        run = get_object_or_404(InferenceRun, id=run_id, project_id=project_id)
+        run.cancel_requested = True
+        if run.status in (InferenceRun.STATUS_PENDING, InferenceRun.STATUS_RUNNING):
+            run.status = InferenceRun.STATUS_CANCELLING
+        run.save(update_fields=["cancel_requested", "status"])
+        return 200, RunOutput.from_run(run)
 
     @http_post(
-        "/jobs/{job_id}/retry",
+        "/runs/{run_id}/retry",
         permissions=[IsAuthenticated, IsProjectSupervisorOrAdmin],
         auth=JWTAuth(),
-        response={200: JobOutput},
-        url_name="infer_auto_job_retry",
+        response={200: RunOutput},
+        url_name="infer_auto_run_retry",
     )
-    def retry(self, request, project_id: int, job_id: int):
-        job = get_object_or_404(InferenceJob, id=job_id, project_id=project_id)
+    def retry(self, request, project_id: int, run_id: int):
+        run = get_object_or_404(InferenceRun, id=run_id, project_id=project_id)
 
         with transaction.atomic():
-            reset = job.items.filter(
+            reset = run.tasks.filter(
                 status__in=[
-                    InferenceJobItem.STATUS_FAILED,
-                    InferenceJobItem.STATUS_SKIPPED,
+                    InferenceTask.STATUS_FAILED,
+                    InferenceTask.STATUS_SKIPPED,
                 ]
-            ).update(status=InferenceJobItem.STATUS_PENDING)
-            job.failed_items = 0
-            job.cancel_requested = False
-            job.status = InferenceJob.STATUS_PENDING
-            job.error = ""
+            ).update(status=InferenceTask.STATUS_PENDING)
+            run.failed_items = 0
+            run.cancel_requested = False
+            run.status = InferenceRun.STATUS_PENDING
+            run.error = ""
             # Refresh the deadline relative to the work remaining.
-            job.deadline = timezone.now() + timedelta(
-                seconds=(reset + 1) * job.provider.timeout_seconds
+            run.deadline = timezone.now() + timedelta(
+                seconds=(reset + 1) * run.provider.timeout_seconds
             )
-            job.save(
+            run.save(
                 update_fields=[
                     "failed_items",
                     "cancel_requested",
@@ -482,9 +524,9 @@ class AutoAnnotateController:
                     "deadline",
                 ]
             )
-            transaction.on_commit(lambda: run_inference_job.enqueue(job.id))
+            transaction.on_commit(lambda: run_inference_run.enqueue(run.id))
 
-        return 200, JobOutput.from_job(job)
+        return 200, RunOutput.from_run(run)
 
 
 # ---------------------------------------------------------------------------
@@ -498,15 +540,16 @@ class AutoAnnotateController:
 class ImageAutoAnnotateController:
     """Trigger server-driven inference for a single image asynchronously.
 
-    Creates a single-item ``InferenceJob`` and enqueues it for the background
-    worker, then returns immediately — same pattern as the batch endpoint.
+    Creates an ``InferenceRun`` with a single ``InferenceTask`` and enqueues it
+    for the background worker, then returns immediately. Use
+    ``GET /runs/{run_id}`` to track progress and results.
     """
 
     @http_post(
         "/",
         permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
         auth=JWTAuth(),
-        response={201: JobOutput},
+        response={201: RunOutput},
         url_name="infer_image_auto_annotate",
     )
     def auto_annotate_image(
@@ -527,31 +570,289 @@ class ImageAutoAnnotateController:
         if provider is None:
             raise HttpError(404, "Active provider not found for this project.")
 
+        # Bound the single-image run: one image plus a small buffer.
         deadline = timezone.now() + timedelta(seconds=2 * provider.timeout_seconds)
 
         logger.info(
-            "Creating single-image auto-annotation job: project_id=%d image_id=%d "
-            "provider_id=%d",
+            "Creating single-image inference run: project_id=%d image_id=%d provider_id=%d",
             project.id,
             image.id,
             provider.id,
         )
         with transaction.atomic():
-            job = InferenceJob.objects.create(
+            run = InferenceRun.objects.create(
                 project=project,
                 provider=provider,
                 created_by=request.user,
                 total_items=1,
                 deadline=deadline,
+                provider_snapshot=provider_snapshot(provider),
             )
-            InferenceJobItem.objects.create(job=job, image=image)
-            transaction.on_commit(lambda: run_inference_job.enqueue(job.id))
+            InferenceTask.objects.create(run=run, image=image)
+            transaction.on_commit(lambda: run_inference_run.enqueue(run.id))
 
         logger.info(
-            "Single-image auto-annotation job %d created and task enqueued: "
-            "image_id=%d deadline=%s",
-            job.id,
+            "Single-image inference run %d created and task enqueued: image_id=%d",
+            run.id,
             image.id,
-            deadline.isoformat(),
         )
-        return 201, JobOutput.from_job(job)
+        return 201, RunOutput.from_run(run)
+
+    @http_get(
+        "/runs/{run_id}",
+        permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
+        auth=JWTAuth(),
+        response={200: RunDetailOutput},
+        url_name="infer_image_run_detail",
+    )
+    def run_detail(self, request, project_id: int, image_id: int, run_id: int):
+        run = get_object_or_404(
+            InferenceRun.objects.prefetch_related("tasks"),
+            id=run_id,
+            project_id=project_id,
+            tasks__image_id=image_id,
+        )
+        return 200, RunDetailOutput.from_run_with_tasks(run)
+
+
+# ---------------------------------------------------------------------------
+# Interactive inference provider registry (JWT)
+#
+# Same scoping model as InferenceProviderController: global (project=null,
+# admin-managed) or project-scoped (supervisor-managed). Members can list.
+# ---------------------------------------------------------------------------
+
+
+def _visible_interactive_providers(project_id: int):
+    """Interactive providers usable by a project: its own plus global ones."""
+    return InteractiveInferenceServiceProvider.objects.filter(
+        Q(project_id=project_id) | Q(project__isnull=True)
+    )
+
+
+@api_controller(
+    "/projects/{project_id}/interactive-providers", tags=["interactive-providers"]
+)
+class InteractiveProviderController:
+
+    @http_get(
+        "/",
+        permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
+        auth=JWTAuth(),
+        response={200: PaginatedResponse[InteractiveProviderOutput]},
+        url_name="interactive_provider_list",
+    )
+    def list_providers(
+        self,
+        request,
+        project_id: int,
+        limit: int = 100,
+        offset: int = 0,
+        is_active: bool | None = None,
+    ):
+        qs = _visible_interactive_providers(project_id)
+        if is_active is not None:
+            qs = qs.filter(is_active=is_active)
+        qs = qs.order_by("-created_at")
+        count, limit, offset, rows = paginate_queryset(qs, limit, offset)
+        return 200, PaginatedResponse(
+            count=count,
+            limit=limit,
+            offset=offset,
+            items=[InteractiveProviderOutput.from_provider(p) for p in rows],
+        )
+
+    @http_post(
+        "/",
+        permissions=[IsAuthenticated, IsProjectSupervisorOrAdmin],
+        auth=JWTAuth(),
+        response={201: InteractiveProviderOutput},
+        url_name="interactive_provider_create",
+    )
+    def create(self, request, project_id: int, payload: InteractiveProviderCreateInput):
+        project = get_object_or_404(Project, id=project_id)
+        provider = InteractiveInferenceServiceProvider.objects.create(
+            project=project,
+            created_by=request.user,
+            **payload.dict(),
+        )
+        return 201, InteractiveProviderOutput.from_provider(provider)
+
+    @http_get(
+        "/{provider_id}",
+        permissions=[IsAuthenticated, IsProjectSupervisorOrAdmin],
+        auth=JWTAuth(),
+        response={200: InteractiveProviderOutput},
+        url_name="interactive_provider_detail",
+    )
+    def detail(self, request, project_id: int, provider_id: int):
+        provider = get_object_or_404(
+            _visible_interactive_providers(project_id), id=provider_id
+        )
+        return 200, InteractiveProviderOutput.from_provider(provider)
+
+    @http_patch(
+        "/{provider_id}",
+        permissions=[IsAuthenticated, IsProjectSupervisorOrAdmin],
+        auth=JWTAuth(),
+        response={200: InteractiveProviderOutput},
+        url_name="interactive_provider_update",
+    )
+    def update(
+        self, request, project_id: int, provider_id: int, payload: InteractiveProviderUpdateInput
+    ):
+        # Only project-scoped providers are editable here; globals are admin-managed.
+        provider = get_object_or_404(
+            InteractiveInferenceServiceProvider, id=provider_id, project_id=project_id
+        )
+        for attr, value in payload.dict(exclude_unset=True).items():
+            setattr(provider, attr, value)
+        provider.save()
+        return 200, InteractiveProviderOutput.from_provider(provider)
+
+    @http_delete(
+        "/{provider_id}",
+        permissions=[IsAuthenticated, IsProjectSupervisorOrAdmin],
+        auth=JWTAuth(),
+        response={204: None},
+        url_name="interactive_provider_delete",
+    )
+    def delete(self, request, project_id: int, provider_id: int):
+        provider = get_object_or_404(
+            InteractiveInferenceServiceProvider, id=provider_id, project_id=project_id
+        )
+        provider.delete()
+        return 204, None
+
+
+# ---------------------------------------------------------------------------
+# Interactive inference sessions (JWT, member-level)
+#
+# A user opens a session on an image, submits prompt steps (each a synchronous
+# provider call returning a candidate), and finally commits a chosen step's
+# candidate as a real Annotation2D (Operation.source="interactive") or discards.
+# ---------------------------------------------------------------------------
+
+
+@api_controller(
+    "/projects/{project_id}/images/{image_id}/interactive-sessions",
+    tags=["interactive-sessions"],
+)
+class InteractiveSessionController:
+
+    def _get_session(self, project_id, image_id, session_id, *, editing=False):
+        qs = InteractiveInferenceSession.objects.select_related(
+            "project", "image", "provider", "from_annotation"
+        )
+        session = get_object_or_404(
+            qs, id=session_id, project_id=project_id, image_id=image_id
+        )
+        if editing and session.status != InteractiveInferenceSession.STATUS_EDITING:
+            raise HttpError(409, f"Session is {session.status}, not editing.")
+        return session
+
+    @http_post(
+        "/",
+        permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
+        auth=JWTAuth(),
+        response={201: InteractiveSessionOutput},
+        url_name="interactive_session_start",
+    )
+    def start(self, request, project_id: int, image_id: int, payload: InteractiveSessionStartInput):
+        project = get_object_or_404(Project, id=project_id)
+        image = get_object_or_404(Image2D, id=image_id, project=project)
+
+        provider = (
+            _visible_interactive_providers(project_id)
+            .filter(id=payload.provider_id, is_active=True)
+            .first()
+        )
+        if provider is None:
+            raise HttpError(404, "Active interactive provider not found for this project.")
+
+        from_annotation = None
+        if payload.from_annotation_id is not None:
+            from_annotation = get_object_or_404(
+                Annotation2D,
+                id=payload.from_annotation_id,
+                image=image,
+                project=project,
+                is_active=True,
+            )
+
+        session = start_interactive_session(
+            project=project,
+            image=image,
+            provider=provider,
+            performed_by=request.user,
+            from_annotation=from_annotation,
+        )
+        return 201, InteractiveSessionOutput.from_session(session)
+
+    @http_post(
+        "/{session_id}/steps",
+        permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
+        auth=JWTAuth(),
+        response={201: InteractiveStepOutput},
+        url_name="interactive_session_step",
+    )
+    def add_step(
+        self, request, project_id: int, image_id: int, session_id: int, payload: InteractiveStepInput
+    ):
+        session = self._get_session(project_id, image_id, session_id, editing=True)
+        try:
+            operation = run_interactive_step(session, payload.prompts)
+        except ValueError as exc:
+            raise HttpError(422, str(exc))
+        except Exception as exc:
+            # Provider call failed; the step was recorded with its error.
+            raise HttpError(502, f"Interactive provider call failed: {exc}")
+        return 201, InteractiveStepOutput.from_operation(operation)
+
+    @http_get(
+        "/{session_id}",
+        permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
+        auth=JWTAuth(),
+        response={200: InteractiveSessionDetailOutput},
+        url_name="interactive_session_detail",
+    )
+    def detail(self, request, project_id: int, image_id: int, session_id: int):
+        session = get_object_or_404(
+            InteractiveInferenceSession.objects.prefetch_related("operations"),
+            id=session_id,
+            project_id=project_id,
+            image_id=image_id,
+        )
+        return 200, InteractiveSessionDetailOutput.from_session_with_steps(session)
+
+    @http_post(
+        "/{session_id}/commit",
+        permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
+        auth=JWTAuth(),
+        response={200: InteractiveSessionOutput},
+        url_name="interactive_session_commit",
+    )
+    def commit(
+        self, request, project_id: int, image_id: int, session_id: int, payload: InteractiveCommitInput
+    ):
+        session = self._get_session(project_id, image_id, session_id, editing=True)
+        operation = get_object_or_404(
+            session.operations, id=payload.step_id
+        )
+        try:
+            commit_interactive_session(session, operation)
+        except ValueError as exc:
+            raise HttpError(422, str(exc))
+        return 200, InteractiveSessionOutput.from_session(session)
+
+    @http_post(
+        "/{session_id}/discard",
+        permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
+        auth=JWTAuth(),
+        response={200: InteractiveSessionOutput},
+        url_name="interactive_session_discard",
+    )
+    def discard(self, request, project_id: int, image_id: int, session_id: int):
+        session = self._get_session(project_id, image_id, session_id, editing=True)
+        discard_interactive_session(session)
+        return 200, InteractiveSessionOutput.from_session(session)
