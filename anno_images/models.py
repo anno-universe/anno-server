@@ -152,6 +152,19 @@ class Operation(models.Model):
         ("delete", "Delete"),
     ]
 
+    # Where the operation originated. ``action`` stays orthogonal (what changed);
+    # ``source`` records who/what produced it. AI operations are reverse-traceable
+    # from (source, to_annotation_id): inference -> InferenceResult.annotation,
+    # interactive -> InteractiveInferenceSession.final_annotation.
+    SOURCE_HUMAN = "human"
+    SOURCE_INFERENCE = "inference"
+    SOURCE_INTERACTIVE = "interactive"
+    SOURCE_CHOICES = [
+        (SOURCE_HUMAN, "Human"),
+        (SOURCE_INFERENCE, "Inference"),
+        (SOURCE_INTERACTIVE, "Interactive"),
+    ]
+
     image = models.ForeignKey(
         Image2D,
         on_delete=models.CASCADE,
@@ -174,6 +187,13 @@ class Operation(models.Model):
         help_text="The annotation after the change (null for 'delete' operations).",
     )
     action = models.CharField(max_length=10, choices=ACTION_CHOICES)
+    source = models.CharField(
+        max_length=12,
+        choices=SOURCE_CHOICES,
+        default=SOURCE_HUMAN,
+        db_index=True,
+        help_text="Origin of the operation: human, inference or interactive.",
+    )
     performed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -190,6 +210,7 @@ class Operation(models.Model):
             models.Index(fields=["image", "created_at"]),
             models.Index(fields=["from_annotation"]),
             models.Index(fields=["to_annotation"]),
+            models.Index(fields=["source", "to_annotation"]),
         ]
 
     def __str__(self):

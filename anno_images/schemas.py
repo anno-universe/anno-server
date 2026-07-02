@@ -122,6 +122,7 @@ class OperationOutput(Schema):
     from_annotation_id: int | None
     to_annotation_id: int | None
     action: str
+    source: str
     performed_by_id: int
     created_at: datetime
 
@@ -133,6 +134,7 @@ class OperationOutput(Schema):
             from_annotation_id=op.from_annotation_id,
             to_annotation_id=op.to_annotation_id,
             action=op.action,
+            source=op.source,
             performed_by_id=op.performed_by_id,
             created_at=op.created_at,
         )

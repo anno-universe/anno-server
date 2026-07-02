@@ -276,6 +276,7 @@ class Annotation2DController:
             image=img,
             to_annotation=annotation,
             action="add",
+            source=Operation.SOURCE_HUMAN,
             performed_by=request.user,
         )
 
@@ -363,6 +364,7 @@ class Annotation2DController:
             from_annotation=old,
             to_annotation=new,
             action="modify",
+            source=Operation.SOURCE_HUMAN,
             performed_by=request.user,
         )
 
@@ -391,6 +393,7 @@ class Annotation2DController:
             image=annotation.image,
             from_annotation=annotation,
             action="delete",
+            source=Operation.SOURCE_HUMAN,
             performed_by=request.user,
         )
 
