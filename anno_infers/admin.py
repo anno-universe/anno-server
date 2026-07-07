@@ -112,10 +112,10 @@ class InteractiveInferenceSessionAdmin(admin.ModelAdmin):
         "image",
         "provider",
         "status",
-        "final_annotation",
+        "to_annotation",
         "created_at",
     )
     list_filter = ("status", "project")
-    raw_id_fields = ("project", "image", "provider", "performed_by", "from_annotation", "final_annotation")
-    readonly_fields = ("created_at", "committed_at", "discarded_at")
+    raw_id_fields = ("project", "image", "provider", "performed_by", "from_annotation", "to_annotation")
+    readonly_fields = ("created_at", "updated_at")
     inlines = [InteractiveInferenceOperationInline]

@@ -16,8 +16,8 @@ from ninja_jwt.authentication import JWTAuth
 
 from anno.pagination import PaginatedResponse, paginate_queryset
 from anno_images.controllers import _presigned_redirect
-from anno_images.models import Annotation2D, Image2D
-from anno_projects.models import Project
+from anno_images.models import Annotation2D, Image2D, Operation
+from anno_projects.models import Project, ProjectMembership
 from anno_projects.permissions import IsProjectMemberOrAdmin, IsProjectSupervisorOrAdmin
 
 from .auth import ProjectAPIKeyAuth
@@ -25,10 +25,21 @@ from .models import (
     InferenceRun,
     InferenceServiceProvider,
     InferenceTask,
+    InteractiveInferenceServiceProvider,
+    InteractiveInferenceSession,
+    InteractiveInferenceOperation,
 )
 from .schemas import (
     AutoAnnotateInput,
     ImageAutoAnnotateInput,
+    InteractiveCommitInput,
+    InteractiveProviderCreateInput,
+    InteractiveProviderOutput,
+    InteractiveProviderUpdateInput,
+    InteractiveSessionDetailOutput,
+    InteractiveSessionOutput,
+    InteractiveSessionStartInput,
+    InteractiveSessionStartOutput,
     ProjectAnnotationBatchOutput,
     ProjectAnnotationModifyOutput,
     ProjectAnnotationResultItem,
@@ -43,8 +54,13 @@ from .schemas import (
     RunOutput,
     TaskDetailOutput,
 )
+from . import services
 from .services import create_ai_annotation, modify_ai_annotation, provider_snapshot
 from .tasks import run_inference_run
+
+#: Header the browser presents the session token in on its direct service calls.
+#: Matches the anno-sdk interactive server default (``X-Session-Token``).
+INTERACTIVE_TOKEN_HEADER = "X-Session-Token"
 
 # ---------------------------------------------------------------------------
 # Project inference endpoints (API-key auth; project implied by the key)
@@ -594,3 +610,358 @@ class ImageAutoAnnotateController:
             tasks__image_id=image_id,
         )
         return 200, RunDetailOutput.from_run_with_tasks(run)
+
+
+# ---------------------------------------------------------------------------
+# Interactive inference provider registry (JWT)
+#
+# Mirrors InferenceProviderController for prompt-driven (SAM/SAM2/MedSAM)
+# services. Providers are global (admin-managed) or project-scoped (supervisor
+# managed). ``auth_secret`` is the outbound credential the server presents on
+# the session handshake; it is never serialized.
+# ---------------------------------------------------------------------------
+
+
+def _visible_interactive_providers(project_id: int):
+    """Interactive providers usable by a project: its own plus global ones."""
+    return InteractiveInferenceServiceProvider.objects.filter(
+        Q(project_id=project_id) | Q(project__isnull=True)
+    )
+
+
+@api_controller(
+    "/projects/{project_id}/interactive-providers", tags=["infer-interactive"]
+)
+class InteractiveInferenceProviderController:
+
+    @http_get(
+        "/",
+        permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
+        auth=JWTAuth(),
+        response={200: PaginatedResponse[InteractiveProviderOutput]},
+        url_name="interactive_provider_list",
+    )
+    def list_providers(
+        self,
+        request,
+        project_id: int,
+        limit: int = 100,
+        offset: int = 0,
+        is_active: bool | None = None,
+    ):
+        qs = _visible_interactive_providers(project_id)
+        if is_active is not None:
+            qs = qs.filter(is_active=is_active)
+        qs = qs.order_by("-created_at")
+        count, limit, offset, rows = paginate_queryset(qs, limit, offset)
+        return 200, PaginatedResponse(
+            count=count,
+            limit=limit,
+            offset=offset,
+            items=[InteractiveProviderOutput.from_provider(p) for p in rows],
+        )
+
+    @http_post(
+        "/",
+        permissions=[IsAuthenticated, IsProjectSupervisorOrAdmin],
+        auth=JWTAuth(),
+        response={201: InteractiveProviderOutput},
+        url_name="interactive_provider_create",
+    )
+    def create(self, request, project_id: int, payload: InteractiveProviderCreateInput):
+        project = get_object_or_404(Project, id=project_id)
+        provider = InteractiveInferenceServiceProvider.objects.create(
+            project=project,
+            created_by=request.user,
+            **payload.dict(),
+        )
+        return 201, InteractiveProviderOutput.from_provider(provider)
+
+    @http_get(
+        "/{provider_id}",
+        permissions=[IsAuthenticated, IsProjectSupervisorOrAdmin],
+        auth=JWTAuth(),
+        response={200: InteractiveProviderOutput},
+        url_name="interactive_provider_detail",
+    )
+    def detail(self, request, project_id: int, provider_id: int):
+        provider = get_object_or_404(
+            _visible_interactive_providers(project_id), id=provider_id
+        )
+        return 200, InteractiveProviderOutput.from_provider(provider)
+
+    @http_patch(
+        "/{provider_id}",
+        permissions=[IsAuthenticated, IsProjectSupervisorOrAdmin],
+        auth=JWTAuth(),
+        response={200: InteractiveProviderOutput},
+        url_name="interactive_provider_update",
+    )
+    def update(
+        self,
+        request,
+        project_id: int,
+        provider_id: int,
+        payload: InteractiveProviderUpdateInput,
+    ):
+        # Only project-scoped providers are editable here; globals are admin-managed.
+        provider = get_object_or_404(
+            InteractiveInferenceServiceProvider, id=provider_id, project_id=project_id
+        )
+        for attr, value in payload.dict(exclude_unset=True).items():
+            setattr(provider, attr, value)
+        provider.save()
+        return 200, InteractiveProviderOutput.from_provider(provider)
+
+    @http_delete(
+        "/{provider_id}",
+        permissions=[IsAuthenticated, IsProjectSupervisorOrAdmin],
+        auth=JWTAuth(),
+        response={204: None},
+        url_name="interactive_provider_delete",
+    )
+    def delete(self, request, project_id: int, provider_id: int):
+        provider = get_object_or_404(
+            InteractiveInferenceServiceProvider, id=provider_id, project_id=project_id
+        )
+        provider.delete()
+        return 204, None
+
+
+# ---------------------------------------------------------------------------
+# Interactive inference sessions (JWT)
+#
+# Direct-call flow: the server opens a session (server->service handshake that
+# yields a short-lived browser token), the browser runs the prompt loop against
+# the service directly, then commits the chosen candidate back here. The server
+# persists the final annotation immutably (source="interactive") and releases
+# the service's seat (best-effort). See anno_infers/services.py.
+# ---------------------------------------------------------------------------
+
+
+def _finalizable_by(request, project_id: int, session) -> bool:
+    """The session owner, a project supervisor, or a system admin may finalize."""
+    user = request.user
+    if session.performed_by_id == user.id:
+        return True
+    if user.groups.filter(name="admin").exists():
+        return True
+    return ProjectMembership.objects.filter(
+        project_id=project_id, user=user, role="supervisor"
+    ).exists()
+
+
+def _commit_geometry(payload: InteractiveCommitInput):
+    """Return the geometry input matching ``annotation_type`` or raise 422."""
+    geo = {
+        "polygon": payload.polygon,
+        "box": payload.box,
+        "keypoint": payload.keypoint,
+    }.get(payload.annotation_type)
+    if geo is None:
+        raise HttpError(
+            422, f"Missing '{payload.annotation_type}' geometry for commit."
+        )
+    return geo
+
+
+@api_controller(
+    "/projects/{project_id}/images/{image_id}/interactive-sessions",
+    tags=["infer-interactive"],
+)
+class InteractiveSessionController:
+
+    @http_post(
+        "/",
+        permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
+        auth=JWTAuth(),
+        response={201: InteractiveSessionStartOutput},
+        url_name="interactive_session_start",
+    )
+    def start(
+        self,
+        request,
+        project_id: int,
+        image_id: int,
+        payload: InteractiveSessionStartInput,
+    ):
+        project = get_object_or_404(Project, id=project_id)
+        image = get_object_or_404(Image2D, id=image_id, project=project)
+
+        provider = (
+            _visible_interactive_providers(project_id)
+            .filter(id=payload.provider_id, is_active=True)
+            .first()
+        )
+        if provider is None:
+            raise HttpError(
+                404, "Active interactive provider not found for this project."
+            )
+
+        from_annotation = None
+        if payload.from_annotation_id is not None:
+            from_annotation = get_object_or_404(
+                Annotation2D,
+                id=payload.from_annotation_id,
+                image=image,
+                is_active=True,
+            )
+
+        session = InteractiveInferenceSession.objects.create(
+            project=project,
+            image=image,
+            provider=provider,
+            performed_by=request.user,
+            from_annotation=from_annotation,
+        )
+
+        try:
+            handshake = services.open_interactive_session(
+                provider=provider,
+                session=session,
+                ttl_seconds=django_settings.INTERACTIVE_SESSION_TOKEN_TTL_SECONDS,
+                label_mapping=project.label_mapping,
+                requested_types=provider.supported_result_types,
+                width=image.width,
+                height=image.height,
+            )
+        except Exception as exc:
+            session.status = InteractiveInferenceSession.STATUS_FAILED
+            session.error = f"session handshake failed: {exc}"
+            session.save(update_fields=["status", "error", "updated_at"])
+            logger.warning(
+                "Interactive session %d: handshake with provider %d failed: %s",
+                session.id,
+                provider.id,
+                exc,
+            )
+            raise HttpError(
+                502, "Failed to open a session with the interactive inference service."
+            )
+
+        base = InteractiveSessionOutput.from_session(session)
+        return 201, InteractiveSessionStartOutput(
+            **base.dict(),
+            token=handshake.token,
+            token_header=INTERACTIVE_TOKEN_HEADER,
+            token_expires_at=handshake.expires_at,
+            predict_url=handshake.predict_url or provider.inference_url,
+            session_ref=handshake.session_ref,
+            supported_prompt_types=list(provider.supported_prompt_types),
+            supported_result_types=list(provider.supported_result_types),
+        )
+
+    @http_get(
+        "/{session_id}",
+        permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
+        auth=JWTAuth(),
+        response={200: InteractiveSessionDetailOutput},
+        url_name="interactive_session_detail",
+    )
+    def detail(self, request, project_id: int, image_id: int, session_id: int):
+        session = get_object_or_404(
+            InteractiveInferenceSession.objects.prefetch_related("operations"),
+            id=session_id,
+            project_id=project_id,
+            image_id=image_id,
+        )
+        return 200, InteractiveSessionDetailOutput.from_session_with_steps(session)
+
+    @http_post(
+        "/{session_id}/commit",
+        permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
+        auth=JWTAuth(),
+        response={200: InteractiveSessionOutput},
+        url_name="interactive_session_commit",
+    )
+    def commit(
+        self,
+        request,
+        project_id: int,
+        image_id: int,
+        session_id: int,
+        payload: InteractiveCommitInput,
+    ):
+        session = get_object_or_404(
+            InteractiveInferenceSession,
+            id=session_id,
+            project_id=project_id,
+            image_id=image_id,
+        )
+        if not _finalizable_by(request, project_id, session):
+            raise HttpError(403, "You cannot commit this session.")
+        if session.status != InteractiveInferenceSession.STATUS_EDITING:
+            raise HttpError(409, f"Session is {session.status}, not editing.")
+
+        geometry = _commit_geometry(payload)
+
+        with transaction.atomic():
+            step_index = session.operations.count() + 1
+            InteractiveInferenceOperation.objects.create(
+                session=session,
+                step_index=step_index,
+                prompt={"prompts": payload.prompts},
+                result={"score": payload.score, "model_version": payload.model_version},
+                result_type=payload.annotation_type,
+                result_data=geometry.dict(),
+            )
+
+            if session.from_annotation_id is not None:
+                annotation = modify_ai_annotation(
+                    old_annotation=session.from_annotation,
+                    annotation_type=payload.annotation_type,
+                    label=payload.label,
+                    polygon=payload.polygon,
+                    box=payload.box,
+                    keypoint=payload.keypoint,
+                    performed_by=request.user,
+                    source=Operation.SOURCE_INTERACTIVE,
+                )
+            else:
+                annotation = create_ai_annotation(
+                    image=session.image,
+                    project=session.project,
+                    annotation_type=payload.annotation_type,
+                    label=payload.label,
+                    polygon=payload.polygon,
+                    box=payload.box,
+                    keypoint=payload.keypoint,
+                    performed_by=request.user,
+                    source=Operation.SOURCE_INTERACTIVE,
+                )
+
+            session.to_annotation = annotation
+            session.status = InteractiveInferenceSession.STATUS_COMMITTED
+            session.save(update_fields=["to_annotation", "status", "updated_at"])
+
+        services.complete_interactive_session(
+            provider=session.provider, session_id=session.id
+        )
+        return 200, InteractiveSessionOutput.from_session(session)
+
+    @http_post(
+        "/{session_id}/discard",
+        permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
+        auth=JWTAuth(),
+        response={200: InteractiveSessionOutput},
+        url_name="interactive_session_discard",
+    )
+    def discard(self, request, project_id: int, image_id: int, session_id: int):
+        session = get_object_or_404(
+            InteractiveInferenceSession,
+            id=session_id,
+            project_id=project_id,
+            image_id=image_id,
+        )
+        if not _finalizable_by(request, project_id, session):
+            raise HttpError(403, "You cannot discard this session.")
+        if session.status != InteractiveInferenceSession.STATUS_EDITING:
+            raise HttpError(409, f"Session is {session.status}, not editing.")
+
+        session.status = InteractiveInferenceSession.STATUS_DISCARDED
+        session.save(update_fields=["status", "updated_at"])
+
+        services.complete_interactive_session(
+            provider=session.provider, session_id=session.id
+        )
+        return 200, InteractiveSessionOutput.from_session(session)

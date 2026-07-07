@@ -395,9 +395,11 @@ class InteractiveInferenceSession(models.Model):
     """One user's interactive prompting session over a single image.
 
     The user refines a candidate through repeated prompts and may finally commit
-    it as an ``Annotation2D``. Given an ``Operation`` with
-    ``source == "interactive"``, the session is reverse-traceable via
-    ``InteractiveInferenceSession.objects.get(final_annotation_id=operation.to_annotation_id)``.
+    it as an ``Annotation2D``. Like an ``Operation``, a session records the
+    original it refined (``from_annotation``) and the result it produced
+    (``to_annotation``), so given an ``Operation`` with ``source == "interactive"``
+    the session is reverse-traceable via
+    ``InteractiveInferenceSession.objects.get(to_annotation_id=operation.to_annotation_id)``.
     """
 
     STATUS_EDITING = "editing"
@@ -439,7 +441,7 @@ class InteractiveInferenceSession(models.Model):
         related_name="interactive_sessions_as_from",
         help_text="Original annotation when refining an existing one (null for new).",
     )
-    final_annotation = models.ForeignKey(
+    to_annotation = models.ForeignKey(
         "anno_images.Annotation2D",
         null=True,
         blank=True,
@@ -452,15 +454,16 @@ class InteractiveInferenceSession(models.Model):
     )
     error = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
-    committed_at = models.DateTimeField(null=True, blank=True)
-    discarded_at = models.DateTimeField(null=True, blank=True)
+    # A session is terminal after commit/discard/failure, so ``updated_at`` (with
+    # ``status``) captures when it ended — no separate committed_at/discarded_at.
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "anno_interactive_session"
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["project", "status"]),
-            models.Index(fields=["final_annotation"]),
+            models.Index(fields=["to_annotation"]),
         ]
 
     def __str__(self) -> str:

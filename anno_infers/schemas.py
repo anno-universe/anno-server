@@ -523,20 +523,23 @@ class InteractiveSessionStartInput(Schema):
     from_annotation_id: int | None = None
 
 
-class InteractiveStepInput(Schema):
-    """Submit a set of prompts for the next step.
+class InteractiveCommitInput(Schema):
+    """Commit the user's chosen candidate as a real annotation.
 
-    Each prompt is an open dict tagged with ``type`` (box / positive_point /
-    negative_point / mask / text) plus prompt-specific keys.
+    In the direct-call flow the per-prompt loop runs browser -> service, so the
+    server never saw the intermediate steps; the frontend sends the final
+    prompts (for audit) plus the chosen geometry here. Exactly one geometry
+    field must match ``annotation_type``.
     """
 
-    prompts: list[dict]
-
-
-class InteractiveCommitInput(Schema):
-    """Commit a chosen step's candidate as a real annotation."""
-
-    step_id: int
+    annotation_type: str
+    label: int | None = None
+    polygon: Polygon2DDataInput | None = None
+    box: Box2DDataInput | None = None
+    keypoint: Keypoint2DDataInput | None = None
+    prompts: list[dict] = []
+    score: float | None = None
+    model_version: str = ""
 
 
 class InteractiveStepOutput(Schema):
@@ -572,12 +575,11 @@ class InteractiveSessionOutput(Schema):
     provider_id: int
     performed_by_id: int
     from_annotation_id: int | None
-    final_annotation_id: int | None
+    to_annotation_id: int | None
     status: str
     error: str
     created_at: datetime
-    committed_at: datetime | None
-    discarded_at: datetime | None
+    updated_at: datetime
 
     @staticmethod
     def from_session(s) -> "InteractiveSessionOutput":
@@ -588,13 +590,30 @@ class InteractiveSessionOutput(Schema):
             provider_id=s.provider_id,
             performed_by_id=s.performed_by_id,
             from_annotation_id=s.from_annotation_id,
-            final_annotation_id=s.final_annotation_id,
+            to_annotation_id=s.to_annotation_id,
             status=s.status,
             error=s.error,
             created_at=s.created_at,
-            committed_at=s.committed_at,
-            discarded_at=s.discarded_at,
+            updated_at=s.updated_at,
         )
+
+
+class InteractiveSessionStartOutput(InteractiveSessionOutput):
+    """Session record plus the short-lived credential for the direct calls.
+
+    The frontend presents ``token`` in the ``token_header`` header on its direct
+    calls to the service — ``{predict_url}/{id}/infer_image`` (upload the image
+    once) and ``{predict_url}/{id}/predict`` (per prompt). ``token_expires_at`` is
+    the service-reported ISO-8601 expiry.
+    """
+
+    token: str
+    token_header: str
+    token_expires_at: str | None = None
+    predict_url: str | None = None
+    session_ref: str | None = None
+    supported_prompt_types: list[str] = []
+    supported_result_types: list[str] = []
 
 
 class InteractiveSessionDetailOutput(InteractiveSessionOutput):
