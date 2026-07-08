@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from django.conf import settings
-from ninja import Schema
+from ninja import Field, Schema
 from pydantic import field_validator
 
 from anno_images.schemas import Box2DDataInput, Keypoint2DDataInput, Polygon2DDataInput
@@ -156,7 +156,7 @@ def _validate_result_types(value: list[str]) -> list[str]:
 
 class ProviderCreateInput(Schema):
     name: str
-    inference_url: str
+    inference_url: str = Field(description="The service's base URL (e.g., https://infer.example.com). /predict will be appended by the platform.")
     supported_result_types: list[str]
     model_name: str = ""
     description: str = ""
@@ -183,7 +183,7 @@ class ProviderUpdateInput(Schema):
     """Partial update; all fields optional. ``auth_secret`` is write-only."""
 
     name: str | None = None
-    inference_url: str | None = None
+    inference_url: str | None = Field(default=None, description="The service's base URL (e.g., https://infer.example.com). /predict will be appended by the platform.")
     supported_result_types: list[str] | None = None
     model_name: str | None = None
     description: str | None = None
@@ -218,7 +218,7 @@ class ProviderOutput(Schema):
     name: str
     model_name: str
     description: str
-    inference_url: str
+    inference_url: str = Field(description="The service's base URL (e.g., https://infer.example.com). /predict will be appended by the platform.")
     supported_result_types: list[str]
     auth_type: str
     auth_param_name: str
@@ -411,7 +411,7 @@ def _validate_prompt_types(value: list[str]) -> list[str]:
 
 class InteractiveProviderCreateInput(Schema):
     name: str
-    inference_url: str
+    inference_url: str = Field(description="The service's base URL (e.g., https://infer.example.com). /session will be appended by the platform.")
     supported_prompt_types: list[str]
     supported_result_types: list[str]
     model_name: str = ""
@@ -444,7 +444,7 @@ class InteractiveProviderUpdateInput(Schema):
     """Partial update; all fields optional. ``auth_secret`` is write-only."""
 
     name: str | None = None
-    inference_url: str | None = None
+    inference_url: str | None = Field(default=None, description="The service's base URL (e.g., https://infer.example.com). /session will be appended by the platform.")
     supported_prompt_types: list[str] | None = None
     supported_result_types: list[str] | None = None
     model_name: str | None = None
@@ -480,7 +480,7 @@ class InteractiveProviderOutput(Schema):
     name: str
     model_name: str
     description: str
-    inference_url: str
+    inference_url: str = Field(description="The service's base URL (e.g., https://infer.example.com). /session will be appended by the platform.")
     supported_prompt_types: list[str]
     supported_result_types: list[str]
     auth_type: str
@@ -520,7 +520,6 @@ class InteractiveSessionStartInput(Schema):
     """Open an interactive session on an image (image_id comes from the URL)."""
 
     provider_id: int
-    from_annotation_id: int | None = None
 
 
 class InteractiveCommitInput(Schema):
@@ -550,6 +549,7 @@ class InteractiveStepOutput(Schema):
     result: dict
     result_type: str
     result_data: dict
+    annotation_id: int | None
     error: str
     created_at: datetime
 
@@ -563,6 +563,7 @@ class InteractiveStepOutput(Schema):
             result=op.result,
             result_type=op.result_type,
             result_data=op.result_data,
+            annotation_id=op.annotation_id,
             error=op.error,
             created_at=op.created_at,
         )
@@ -574,8 +575,6 @@ class InteractiveSessionOutput(Schema):
     image_id: int
     provider_id: int
     performed_by_id: int
-    from_annotation_id: int | None
-    to_annotation_id: int | None
     status: str
     error: str
     created_at: datetime
@@ -589,8 +588,6 @@ class InteractiveSessionOutput(Schema):
             image_id=s.image_id,
             provider_id=s.provider_id,
             performed_by_id=s.performed_by_id,
-            from_annotation_id=s.from_annotation_id,
-            to_annotation_id=s.to_annotation_id,
             status=s.status,
             error=s.error,
             created_at=s.created_at,

@@ -798,21 +798,11 @@ class InteractiveSessionController:
                 404, "Active interactive provider not found for this project."
             )
 
-        from_annotation = None
-        if payload.from_annotation_id is not None:
-            from_annotation = get_object_or_404(
-                Annotation2D,
-                id=payload.from_annotation_id,
-                image=image,
-                is_active=True,
-            )
-
         session = InteractiveInferenceSession.objects.create(
             project=project,
             image=image,
             provider=provider,
             performed_by=request.user,
-            from_annotation=from_annotation,
         )
 
         try:
@@ -839,13 +829,16 @@ class InteractiveSessionController:
                 502, "Failed to open a session with the interactive inference service."
             )
 
+        session.session_token = handshake.token
+        session.save(update_fields=["session_token"])
+
         base = InteractiveSessionOutput.from_session(session)
         return 201, InteractiveSessionStartOutput(
             **base.dict(),
             token=handshake.token,
             token_header=INTERACTIVE_TOKEN_HEADER,
             token_expires_at=handshake.expires_at,
-            predict_url=handshake.predict_url or provider.inference_url,
+            predict_url=handshake.predict_url or provider.inference_url.rstrip("/"),
             session_ref=handshake.session_ref,
             supported_prompt_types=list(provider.supported_prompt_types),
             supported_result_types=list(provider.supported_result_types),
@@ -897,6 +890,19 @@ class InteractiveSessionController:
 
         with transaction.atomic():
             step_index = session.operations.count() + 1
+
+            annotation = create_ai_annotation(
+                image=session.image,
+                project=session.project,
+                annotation_type=payload.annotation_type,
+                label=payload.label,
+                polygon=payload.polygon,
+                box=payload.box,
+                keypoint=payload.keypoint,
+                performed_by=request.user,
+                source=Operation.SOURCE_INTERACTIVE,
+            )
+
             InteractiveInferenceOperation.objects.create(
                 session=session,
                 step_index=step_index,
@@ -904,39 +910,13 @@ class InteractiveSessionController:
                 result={"score": payload.score, "model_version": payload.model_version},
                 result_type=payload.annotation_type,
                 result_data=geometry.dict(),
+                annotation=annotation,
             )
 
-            if session.from_annotation_id is not None:
-                annotation = modify_ai_annotation(
-                    old_annotation=session.from_annotation,
-                    annotation_type=payload.annotation_type,
-                    label=payload.label,
-                    polygon=payload.polygon,
-                    box=payload.box,
-                    keypoint=payload.keypoint,
-                    performed_by=request.user,
-                    source=Operation.SOURCE_INTERACTIVE,
-                )
-            else:
-                annotation = create_ai_annotation(
-                    image=session.image,
-                    project=session.project,
-                    annotation_type=payload.annotation_type,
-                    label=payload.label,
-                    polygon=payload.polygon,
-                    box=payload.box,
-                    keypoint=payload.keypoint,
-                    performed_by=request.user,
-                    source=Operation.SOURCE_INTERACTIVE,
-                )
+            # Keep session editing — only discard ends it.
 
-            session.to_annotation = annotation
-            session.status = InteractiveInferenceSession.STATUS_COMMITTED
-            session.save(update_fields=["to_annotation", "status", "updated_at"])
-
-        services.complete_interactive_session(
-            provider=session.provider, session_id=session.id
-        )
+        # Deliberately do NOT call complete_interactive_session here.
+        # The session stays alive; only discard releases the service seat.
         return 200, InteractiveSessionOutput.from_session(session)
 
     @http_post(
@@ -965,3 +945,16 @@ class InteractiveSessionController:
             provider=session.provider, session_id=session.id
         )
         return 200, InteractiveSessionOutput.from_session(session)
+
+
+# ---------------------------------------------------------------------------
+# Interactive seat management — unified, project-independent controller
+#
+# Seat operations are at a project-free prefix because providers (especially
+# global ones) are shared across projects.  Authorization determines scope:
+#   • admin      — sees and can release seats for any project
+#   • supervisor — only seats in projects they supervise
+#   • others     — 403
+# ---------------------------------------------------------------------------
+
+

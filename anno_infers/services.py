@@ -4,7 +4,6 @@ import httpx
 from anno_sdk import InteractiveSessionCreateRequest, InteractiveSessionCreateResponse
 
 from anno_images.models import Annotation2D, Box2D, Keypoint2D, Operation, Polygon2D
-
 logger = logging.getLogger(__name__)
 
 

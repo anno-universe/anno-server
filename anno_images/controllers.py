@@ -1,3 +1,4 @@
+import logging
 from io import BytesIO
 from urllib.parse import urlparse
 
@@ -29,6 +30,8 @@ from .schemas import (
     Image2DOutput,
     OperationOutput,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _get_s3_client():
@@ -92,13 +95,19 @@ class Image2DController:
         finally:
             file.seek(0)
 
-        img = Image2D.objects.create(
-            project=project,
-            image=file,
-            file_name=file.name,
-            width=width,
-            height=height,
-        )
+        try:
+            img = Image2D.objects.create(
+                project=project,
+                image=file,
+                file_name=file.name,
+                width=width,
+                height=height,
+            )
+        except Exception:
+            logger.exception(
+                "Image upload failed for project %d: %s", project_id, file.name
+            )
+            raise HttpError(500, "Image upload failed. The storage service may be unavailable.")
         return 201, Image2DOutput.from_image(img)
 
     @http_get(

@@ -104,7 +104,7 @@
     },
     "/api/users/register": {
       "post": {
-        "operationId": "user_register_25e62b5c",
+        "operationId": "user_register_b4d9d5f6",
         "summary": "Register",
         "parameters": [],
         "responses": {
@@ -136,7 +136,7 @@
     },
     "/api/users/me": {
       "get": {
-        "operationId": "user_profile_f048a221",
+        "operationId": "user_profile_b03c609f",
         "summary": "Profile",
         "parameters": [],
         "responses": {
@@ -161,7 +161,7 @@
         ]
       },
       "patch": {
-        "operationId": "user_update_profile_36cc84b3",
+        "operationId": "user_update_profile_a288efd3",
         "summary": "Update Profile",
         "parameters": [],
         "responses": {
@@ -198,7 +198,7 @@
     },
     "/api/users/search": {
       "get": {
-        "operationId": "user_search_users_accbaa16",
+        "operationId": "user_search_users_b687fa2b",
         "summary": "Search Users",
         "parameters": [
           {
@@ -255,7 +255,7 @@
     },
     "/api/projects/": {
       "post": {
-        "operationId": "project_create_ad06e626",
+        "operationId": "project_create_9cd62389",
         "summary": "Create",
         "parameters": [],
         "responses": {
@@ -290,7 +290,7 @@
         ]
       },
       "get": {
-        "operationId": "project_list_projects_59cb91c7",
+        "operationId": "project_list_projects_94575f83",
         "summary": "List Projects",
         "parameters": [
           {
@@ -338,7 +338,7 @@
     },
     "/api/projects/{project_id}": {
       "get": {
-        "operationId": "project_detail_f7c8bdc6",
+        "operationId": "project_detail_d7d382aa",
         "summary": "Detail",
         "parameters": [
           {
@@ -373,7 +373,7 @@
         ]
       },
       "patch": {
-        "operationId": "project_update_8d32a7e7",
+        "operationId": "project_update_926ead00",
         "summary": "Update",
         "parameters": [
           {
@@ -418,7 +418,7 @@
         ]
       },
       "delete": {
-        "operationId": "project_delete_82f7e312",
+        "operationId": "project_delete_a989b871",
         "summary": "Delete",
         "parameters": [
           {
@@ -448,7 +448,7 @@
     },
     "/api/projects/{project_id}/members": {
       "get": {
-        "operationId": "project_list_members_ea231db8",
+        "operationId": "project_list_members_2542cfd4",
         "summary": "List Members",
         "parameters": [
           {
@@ -503,7 +503,7 @@
         ]
       },
       "post": {
-        "operationId": "project_add_member_4bcd54b1",
+        "operationId": "project_add_member_4a4b6ea0",
         "summary": "Add Member",
         "parameters": [
           {
@@ -550,7 +550,7 @@
     },
     "/api/projects/{project_id}/members/{user_id}": {
       "patch": {
-        "operationId": "project_update_member_role_7c8b516d",
+        "operationId": "project_update_member_role_ec213366",
         "summary": "Update Member Role",
         "parameters": [
           {
@@ -604,7 +604,7 @@
         ]
       },
       "delete": {
-        "operationId": "project_remove_member_95555b91",
+        "operationId": "project_remove_member_91d093c8",
         "summary": "Remove Member",
         "parameters": [
           {
@@ -643,7 +643,7 @@
     },
     "/api/projects/{project_id}/api-keys/": {
       "post": {
-        "operationId": "apikey_create_856cb64d",
+        "operationId": "apikey_create_5d6722a0",
         "summary": "Create",
         "parameters": [
           {
@@ -688,7 +688,7 @@
         ]
       },
       "get": {
-        "operationId": "apikey_list_keys_3ae0efde",
+        "operationId": "apikey_list_keys_d42630c3",
         "summary": "List Keys",
         "parameters": [
           {
@@ -745,7 +745,7 @@
     },
     "/api/projects/{project_id}/api-keys/{key_id}": {
       "get": {
-        "operationId": "apikey_detail_a60edd66",
+        "operationId": "apikey_detail_250db567",
         "summary": "Detail",
         "parameters": [
           {
@@ -789,7 +789,7 @@
         ]
       },
       "patch": {
-        "operationId": "apikey_update_e545643c",
+        "operationId": "apikey_update_9b7499ff",
         "summary": "Update",
         "parameters": [
           {
@@ -843,7 +843,7 @@
         ]
       },
       "delete": {
-        "operationId": "apikey_delete_6b8df632",
+        "operationId": "apikey_delete_0aabde5a",
         "summary": "Delete",
         "parameters": [
           {
@@ -882,7 +882,7 @@
     },
     "/api/projects/{project_id}/tags/": {
       "get": {
-        "operationId": "tag_list_tags_d04cc4fb",
+        "operationId": "tag_list_tags_ddd8b4f8",
         "summary": "List Tags",
         "parameters": [
           {
@@ -953,7 +953,7 @@
         ]
       },
       "post": {
-        "operationId": "tag_create_e1a330a6",
+        "operationId": "tag_create_0c058897",
         "summary": "Create",
         "parameters": [
           {
@@ -1000,7 +1000,7 @@
     },
     "/api/projects/{project_id}/tags/stats": {
       "get": {
-        "operationId": "tag_tag_stats_47b71348",
+        "operationId": "tag_tag_stats_87415289",
         "summary": "Tag Stats",
         "parameters": [
           {
@@ -1037,7 +1037,7 @@
     },
     "/api/projects/{project_id}/tags/{tag_id}": {
       "get": {
-        "operationId": "tag_detail_bf6662e3",
+        "operationId": "tag_detail_f2979105",
         "summary": "Detail",
         "parameters": [
           {
@@ -1081,7 +1081,7 @@
         ]
       },
       "patch": {
-        "operationId": "tag_update_aac9c922",
+        "operationId": "tag_update_14ed1856",
         "summary": "Update",
         "parameters": [
           {
@@ -1135,7 +1135,7 @@
         ]
       },
       "delete": {
-        "operationId": "tag_delete_7f0e22a2",
+        "operationId": "tag_delete_528cfa47",
         "summary": "Delete",
         "parameters": [
           {
@@ -1174,7 +1174,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/tags/": {
       "get": {
-        "operationId": "imagetag_list_tags_ac24dabe",
+        "operationId": "imagetag_list_tags_18eae8dc",
         "summary": "List Tags",
         "parameters": [
           {
@@ -1222,7 +1222,7 @@
         ]
       },
       "post": {
-        "operationId": "imagetag_apply_f7913114",
+        "operationId": "imagetag_apply_6e987021",
         "summary": "Apply",
         "parameters": [
           {
@@ -1278,7 +1278,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/tags/{tag_id}": {
       "delete": {
-        "operationId": "imagetag_remove_db50db96",
+        "operationId": "imagetag_remove_fee704e0",
         "summary": "Remove",
         "parameters": [
           {
@@ -1326,7 +1326,7 @@
     },
     "/api/projects/{project_id}/images/": {
       "post": {
-        "operationId": "image2d_upload_5f09fc30",
+        "operationId": "image2d_upload_7ca2b01a",
         "summary": "Upload",
         "parameters": [
           {
@@ -1382,7 +1382,7 @@
         ]
       },
       "get": {
-        "operationId": "image2d_list_images_54a2da32",
+        "operationId": "image2d_list_images_faa1c5fd",
         "summary": "List Images",
         "parameters": [
           {
@@ -1455,7 +1455,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}": {
       "get": {
-        "operationId": "image2d_detail_9cb5ab21",
+        "operationId": "image2d_detail_f07005b4",
         "summary": "Detail",
         "parameters": [
           {
@@ -1501,7 +1501,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/original_image": {
       "get": {
-        "operationId": "image2d_file_a20f4801",
+        "operationId": "image2d_file_2c0e0f3c",
         "summary": "File",
         "parameters": [
           {
@@ -1540,7 +1540,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/thumbnail_image": {
       "get": {
-        "operationId": "image2d_thumbnail_be81481e",
+        "operationId": "image2d_thumbnail_1a928d23",
         "summary": "Thumbnail",
         "parameters": [
           {
@@ -1599,7 +1599,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/annotations/": {
       "post": {
-        "operationId": "annotation2d_create_38ed524f",
+        "operationId": "annotation2d_create_eca70bf6",
         "summary": "Create",
         "parameters": [
           {
@@ -1653,7 +1653,7 @@
         ]
       },
       "get": {
-        "operationId": "annotation2d_list_annotations_f13b1e77",
+        "operationId": "annotation2d_list_annotations_a12f56d6",
         "summary": "List Annotations",
         "parameters": [
           {
@@ -1719,7 +1719,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/annotations/{annotation_id}": {
       "get": {
-        "operationId": "annotation2d_detail_5b7446cb",
+        "operationId": "annotation2d_detail_776ab573",
         "summary": "Detail",
         "parameters": [
           {
@@ -1772,7 +1772,7 @@
         ]
       },
       "patch": {
-        "operationId": "annotation2d_modify_ce8f91be",
+        "operationId": "annotation2d_modify_5cbd1265",
         "summary": "Modify",
         "parameters": [
           {
@@ -1835,7 +1835,7 @@
         ]
       },
       "delete": {
-        "operationId": "annotation2d_delete_5f1505ab",
+        "operationId": "annotation2d_delete_beb4aa39",
         "summary": "Delete",
         "parameters": [
           {
@@ -1883,7 +1883,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/operations/": {
       "get": {
-        "operationId": "operation_list_operations_1629b2bd",
+        "operationId": "operation_list_operations_4fb8bd66",
         "summary": "List Operations",
         "parameters": [
           {
@@ -1949,7 +1949,7 @@
     },
     "/api/infers/project/meta": {
       "get": {
-        "operationId": "projectinfer_project_meta_c25427ba",
+        "operationId": "projectinfer_project_meta_2097e846",
         "summary": "Project Meta",
         "parameters": [],
         "responses": {
@@ -1976,7 +1976,7 @@
     },
     "/api/infers/project/images": {
       "get": {
-        "operationId": "projectinfer_list_images_acdb4e65",
+        "operationId": "projectinfer_list_images_f998d6c6",
         "summary": "List Images",
         "parameters": [
           {
@@ -2040,7 +2040,7 @@
     },
     "/api/infers/project/images/{image_id}": {
       "get": {
-        "operationId": "projectinfer_image_detail_da9cf05a",
+        "operationId": "projectinfer_image_detail_32050922",
         "summary": "Image Detail",
         "parameters": [
           {
@@ -2077,7 +2077,7 @@
     },
     "/api/infers/project/images/{image_id}/original_file": {
       "get": {
-        "operationId": "projectinfer_image_file_80b2309c",
+        "operationId": "projectinfer_image_file_1ddd30b2",
         "summary": "Image File",
         "parameters": [
           {
@@ -2107,7 +2107,7 @@
     },
     "/api/infers/project/images/{image_id}/annotations": {
       "post": {
-        "operationId": "projectinfer_submit_image_annotations_7fb713c0",
+        "operationId": "projectinfer_submit_image_annotations_788846f2",
         "summary": "Submit Image Annotations",
         "parameters": [
           {
@@ -2155,7 +2155,7 @@
     },
     "/api/infers/project/images/{image_id}/annotations/{annotation_id}": {
       "patch": {
-        "operationId": "projectinfer_modify_image_annotation_be8a93fd",
+        "operationId": "projectinfer_modify_image_annotation_2d348c19",
         "summary": "Modify Image Annotation",
         "parameters": [
           {
@@ -2212,7 +2212,7 @@
     },
     "/api/projects/{project_id}/inference-providers/": {
       "get": {
-        "operationId": "inferenceprovider_list_providers_4a8a603f",
+        "operationId": "inferenceprovider_list_providers_9edf98b7",
         "summary": "List Providers",
         "parameters": [
           {
@@ -2283,7 +2283,7 @@
         ]
       },
       "post": {
-        "operationId": "inferenceprovider_create_b181dcaf",
+        "operationId": "inferenceprovider_create_a5df5504",
         "summary": "Create",
         "parameters": [
           {
@@ -2330,7 +2330,7 @@
     },
     "/api/projects/{project_id}/inference-providers/{provider_id}": {
       "get": {
-        "operationId": "inferenceprovider_detail_6c5d14be",
+        "operationId": "inferenceprovider_detail_61750e74",
         "summary": "Detail",
         "parameters": [
           {
@@ -2374,7 +2374,7 @@
         ]
       },
       "patch": {
-        "operationId": "inferenceprovider_update_ba9bd543",
+        "operationId": "inferenceprovider_update_9f88ca6a",
         "summary": "Update",
         "parameters": [
           {
@@ -2428,7 +2428,7 @@
         ]
       },
       "delete": {
-        "operationId": "inferenceprovider_delete_6cc9ecd9",
+        "operationId": "inferenceprovider_delete_5876b661",
         "summary": "Delete",
         "parameters": [
           {
@@ -2467,7 +2467,7 @@
     },
     "/api/projects/{project_id}/auto-annotate/": {
       "post": {
-        "operationId": "autoannotate_start_3d291687",
+        "operationId": "autoannotate_start_28b5a76c",
         "summary": "Start",
         "parameters": [
           {
@@ -2514,7 +2514,7 @@
     },
     "/api/projects/{project_id}/auto-annotate/runs": {
       "get": {
-        "operationId": "autoannotate_list_runs_5f5bba8c",
+        "operationId": "autoannotate_list_runs_e188aa86",
         "summary": "List Runs",
         "parameters": [
           {
@@ -2571,7 +2571,7 @@
     },
     "/api/projects/{project_id}/auto-annotate/runs/{run_id}": {
       "get": {
-        "operationId": "autoannotate_run_detail_3a7018a6",
+        "operationId": "autoannotate_run_detail_e76e8834",
         "summary": "Run Detail",
         "parameters": [
           {
@@ -2617,7 +2617,7 @@
     },
     "/api/projects/{project_id}/auto-annotate/runs/{run_id}/tasks/{task_id}": {
       "get": {
-        "operationId": "autoannotate_task_detail_e86741fd",
+        "operationId": "autoannotate_task_detail_931830e2",
         "summary": "Task Detail",
         "parameters": [
           {
@@ -2673,7 +2673,7 @@
     },
     "/api/projects/{project_id}/auto-annotate/runs/{run_id}/cancel": {
       "post": {
-        "operationId": "autoannotate_cancel_f09188af",
+        "operationId": "autoannotate_cancel_dd6ee2ef",
         "summary": "Cancel",
         "parameters": [
           {
@@ -2719,7 +2719,7 @@
     },
     "/api/projects/{project_id}/auto-annotate/runs/{run_id}/retry": {
       "post": {
-        "operationId": "autoannotate_retry_dd494e9d",
+        "operationId": "autoannotate_retry_5c73c059",
         "summary": "Retry",
         "parameters": [
           {
@@ -2765,7 +2765,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/auto-annotate/": {
       "post": {
-        "operationId": "imageautoannotate_auto_annotate_image_0aaead34",
+        "operationId": "imageautoannotate_auto_annotate_image_2fca28f6",
         "summary": "Auto Annotate Image",
         "parameters": [
           {
@@ -2821,7 +2821,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/auto-annotate/runs/{run_id}": {
       "get": {
-        "operationId": "imageautoannotate_run_detail_2a819168",
+        "operationId": "imageautoannotate_run_detail_3399570d",
         "summary": "Run Detail",
         "parameters": [
           {
@@ -2876,7 +2876,7 @@
     },
     "/api/projects/{project_id}/interactive-providers/": {
       "get": {
-        "operationId": "interactiveinferenceprovider_list_providers_603903be",
+        "operationId": "interactiveinferenceprovider_list_providers_18d8e75a",
         "summary": "List Providers",
         "parameters": [
           {
@@ -2947,7 +2947,7 @@
         ]
       },
       "post": {
-        "operationId": "interactiveinferenceprovider_create_ce39f01c",
+        "operationId": "interactiveinferenceprovider_create_e8de1695",
         "summary": "Create",
         "parameters": [
           {
@@ -2994,7 +2994,7 @@
     },
     "/api/projects/{project_id}/interactive-providers/{provider_id}": {
       "get": {
-        "operationId": "interactiveinferenceprovider_detail_75b59e5f",
+        "operationId": "interactiveinferenceprovider_detail_a3a4faaf",
         "summary": "Detail",
         "parameters": [
           {
@@ -3038,7 +3038,7 @@
         ]
       },
       "patch": {
-        "operationId": "interactiveinferenceprovider_update_a08c8106",
+        "operationId": "interactiveinferenceprovider_update_8d79d83e",
         "summary": "Update",
         "parameters": [
           {
@@ -3092,7 +3092,7 @@
         ]
       },
       "delete": {
-        "operationId": "interactiveinferenceprovider_delete_1d0684be",
+        "operationId": "interactiveinferenceprovider_delete_2fd80874",
         "summary": "Delete",
         "parameters": [
           {
@@ -3131,7 +3131,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/interactive-sessions/": {
       "post": {
-        "operationId": "interactivesession_start_c6d83043",
+        "operationId": "interactivesession_start_9aebae9c",
         "summary": "Start",
         "parameters": [
           {
@@ -3187,7 +3187,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/interactive-sessions/{session_id}": {
       "get": {
-        "operationId": "interactivesession_detail_d13ae938",
+        "operationId": "interactivesession_detail_7e3d811b",
         "summary": "Detail",
         "parameters": [
           {
@@ -3242,7 +3242,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/interactive-sessions/{session_id}/commit": {
       "post": {
-        "operationId": "interactivesession_commit_6e0c26e3",
+        "operationId": "interactivesession_commit_375ec8fd",
         "summary": "Commit",
         "parameters": [
           {
@@ -3307,7 +3307,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/interactive-sessions/{session_id}/discard": {
       "post": {
-        "operationId": "interactivesession_discard_e14642f8",
+        "operationId": "interactivesession_discard_4ca35f60",
         "summary": "Discard",
         "parameters": [
           {
@@ -6322,28 +6322,6 @@
             "title": "Performed By Id",
             "type": "integer"
           },
-          "from_annotation_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "From Annotation Id"
-          },
-          "to_annotation_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "To Annotation Id"
-          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -6426,8 +6404,6 @@
           "image_id",
           "provider_id",
           "performed_by_id",
-          "from_annotation_id",
-          "to_annotation_id",
           "status",
           "error",
           "created_at",
@@ -6444,17 +6420,6 @@
           "provider_id": {
             "title": "Provider Id",
             "type": "integer"
-          },
-          "from_annotation_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "From Annotation Id"
           }
         },
         "required": [
@@ -6484,28 +6449,6 @@
           "performed_by_id": {
             "title": "Performed By Id",
             "type": "integer"
-          },
-          "from_annotation_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "From Annotation Id"
-          },
-          "to_annotation_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "To Annotation Id"
           },
           "status": {
             "title": "Status",
@@ -6540,8 +6483,6 @@
           "image_id",
           "provider_id",
           "performed_by_id",
-          "from_annotation_id",
-          "to_annotation_id",
           "status",
           "error",
           "created_at",
@@ -6583,6 +6524,17 @@
             "title": "Result Data",
             "type": "object"
           },
+          "annotation_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annotation Id"
+          },
           "error": {
             "title": "Error",
             "type": "string"
@@ -6601,6 +6553,7 @@
           "result",
           "result_type",
           "result_data",
+          "annotation_id",
           "error",
           "created_at"
         ],
@@ -6629,28 +6582,6 @@
             "title": "Performed By Id",
             "type": "integer"
           },
-          "from_annotation_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "From Annotation Id"
-          },
-          "to_annotation_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "To Annotation Id"
-          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -6676,8 +6607,6 @@
           "image_id",
           "provider_id",
           "performed_by_id",
-          "from_annotation_id",
-          "to_annotation_id",
           "status",
           "error",
           "created_at",

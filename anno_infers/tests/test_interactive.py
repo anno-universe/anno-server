@@ -16,7 +16,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.test import Client, TestCase, override_settings
 
-from anno_images.models import Annotation2D, Image2D, Operation, Polygon2D
+from anno_images.models import Annotation2D, Image2D, Operation
 from anno_projects.models import Project, ProjectMembership
 from ninja_jwt.tokens import RefreshToken
 
@@ -45,14 +45,25 @@ def _auth(user):
     return {"Authorization": f"Bearer {RefreshToken.for_user(user).access_token}"}
 
 
+_TOKEN_COUNTER = 0
+
+
+def _unique_token():
+    global _TOKEN_COUNTER
+    _TOKEN_COUNTER += 1
+    return f"tok_{_TOKEN_COUNTER}"
+
+
 def _handshake_response(
-    *, token="tok_abc", expires_at="2026-07-07T12:00:00+00:00", predict_url="https://sam.public"
+    *, token=None, expires_at="2026-07-07T12:00:00+00:00", predict_url="https://sam.public"
 ) -> MagicMock:
     """A mocked httpx response for the server->service handshake.
 
-    Also serves the best-effort ``/session/{id}/complete`` call, which ignores
-    the body — a single return value covers both hops in a test.
+    ``token`` defaults to a unique value so multiple sessions can be created
+    within one test without hitting the ``session_token`` unique constraint.
     """
+    if token is None:
+        token = _unique_token()
     resp = MagicMock()
     resp.raise_for_status.return_value = None
     resp.json.return_value = {
@@ -153,7 +164,7 @@ class InteractiveProviderTests(InteractiveBaseTest):
     def test_create_provider_supervisor_hides_secret(self):
         body = {
             "name": "SAM2",
-            "inference_url": "http://svc/predict",
+            "inference_url": "http://svc",
             "supported_prompt_types": ["box", "positive_point"],
             "supported_result_types": ["polygon"],
             "auth_type": "header",
@@ -177,7 +188,7 @@ class InteractiveProviderTests(InteractiveBaseTest):
     def test_create_provider_worker_forbidden(self):
         body = {
             "name": "x",
-            "inference_url": "http://svc/predict",
+            "inference_url": "http://svc",
             "supported_prompt_types": ["box"],
             "supported_result_types": ["polygon"],
         }
@@ -192,7 +203,7 @@ class InteractiveProviderTests(InteractiveBaseTest):
     def test_invalid_prompt_type_rejected(self):
         body = {
             "name": "x",
-            "inference_url": "http://svc/predict",
+            "inference_url": "http://svc",
             "supported_prompt_types": ["bogus"],
             "supported_result_types": ["polygon"],
         }
@@ -228,9 +239,8 @@ class InteractiveSessionTests(InteractiveBaseTest):
         body = res.json()
         self.assertEqual(body["status"], "editing")
         self.assertEqual(body["image_id"], self.image.id)
-        self.assertIsNone(body["to_annotation_id"])
         # Short-lived token + direct-call coordinates relayed to the browser.
-        self.assertEqual(body["token"], "tok_abc")
+        self.assertTrue(body["token"])
         self.assertEqual(body["token_header"], "X-Session-Token")
         self.assertEqual(body["predict_url"], "https://sam.public")
         self.assertEqual(body["supported_prompt_types"], ["box", "positive_point"])
@@ -267,6 +277,7 @@ class InteractiveSessionTests(InteractiveBaseTest):
         with patch(
             "anno_infers.services.httpx.post", return_value=_handshake_response()
         ) as complete_mock:
+            # First commit
             res = self.client.post(
                 f"{self._base_url(session_id)}/commit",
                 data=json.dumps(_commit_body([[0, 0], [1, 1], [2, 0]], label=1)),
@@ -275,10 +286,14 @@ class InteractiveSessionTests(InteractiveBaseTest):
             )
         self.assertEqual(res.status_code, 200, res.content)
         body = res.json()
-        self.assertEqual(body["status"], "committed")
-        self.assertIsNotNone(body["to_annotation_id"])
+        # Session stays editing after commit — only discard ends it.
+        self.assertEqual(body["status"], "editing")
 
-        annotation = Annotation2D.objects.get(id=body["to_annotation_id"])
+        # Annotation is tracked through InteractiveInferenceOperation.annotation.
+        step = InteractiveInferenceOperation.objects.get(
+            session_id=session_id, step_index=1
+        )
+        annotation = Annotation2D.objects.get(id=step.annotation_id)
         self.assertEqual(annotation.annotation_type, "polygon")
         self.assertEqual(annotation.label, 1)
         self.assertTrue(annotation.is_active)
@@ -290,47 +305,87 @@ class InteractiveSessionTests(InteractiveBaseTest):
         self.assertEqual(op.performed_by_id, self.worker.id)
 
         # The final prompts were recorded on the interactive operation.
-        step = InteractiveInferenceOperation.objects.get(session_id=session_id)
         self.assertEqual(step.prompt["prompts"][0]["type"], "box")
         self.assertEqual(step.result["score"], 0.9)
 
-        # Reverse lookup: source + to_annotation_id -> the session.
-        session = InteractiveInferenceSession.objects.get(
-            to_annotation_id=op.to_annotation_id
+        # Reverse lookup via InteractiveInferenceOperation.annotation:
+        # given an audit Operation we can find the session.
+        iop = InteractiveInferenceOperation.objects.get(
+            annotation_id=op.to_annotation_id
         )
-        self.assertEqual(session.id, session_id)
-        # Best-effort seat release was attempted.
-        complete_mock.assert_called_once()
+        self.assertEqual(iop.session_id, session_id)
 
-    def test_commit_refine_is_modify(self):
-        original = Annotation2D.objects.create(
-            image=self.image, project=self.project, annotation_type="polygon", label=0
-        )
-        Polygon2D.objects.create(annotation=original, points=[[0, 0], [5, 5], [5, 0]])
+        # Session is NOT closed after commit — session stays alive.
+        complete_mock.assert_not_called()
 
+        # Second commit to the same session produces a second annotation.
+        with patch(
+            "anno_infers.services.httpx.post", return_value=_handshake_response()
+        ):
+            res2 = self.client.post(
+                f"{self._base_url(session_id)}/commit",
+                data=json.dumps(_commit_body([[3, 3], [4, 4], [5, 3]], label=2)),
+                content_type="application/json",
+                headers=_auth(self.worker),
+            )
+        self.assertEqual(res2.status_code, 200, res2.content)
+        body2 = res2.json()
+        self.assertEqual(body2["status"], "editing")
+
+        session = InteractiveInferenceSession.objects.get(id=session_id)
+        self.assertEqual(session.status, "editing")
+
+        # Both operations have annotation links.
+        ops = list(session.operations.order_by("step_index"))
+        self.assertEqual(len(ops), 2)
+        self.assertIsNotNone(ops[0].annotation_id)
+        self.assertIsNotNone(ops[1].annotation_id)
+
+        ann2 = Annotation2D.objects.get(id=ops[1].annotation_id)
+        self.assertTrue(ann2.is_active)
+        self.assertEqual(ann2.label, 2)
+        self.assertNotEqual(ops[0].annotation_id, ops[1].annotation_id)
+
+    def test_all_commits_are_additive(self):
+        """Every commit creates an independent annotation with action='add'.
+
+        There is no refine / modify path — ``Operation.from_annotation`` /
+        ``action`` are the canonical audit trail and interactive sessions don't
+        duplicate that."""
         prov = self._make_provider(project=self.project)
-        session_id = self._start_session(
-            prov, from_annotation_id=original.id
-        ).json()["id"]
+        session_id = self._start_session(prov).json()["id"]
 
         with patch(
             "anno_infers.services.httpx.post", return_value=_handshake_response()
         ):
-            res = self.client.post(
-                f"{self._base_url(session_id)}/commit",
-                data=json.dumps(_commit_body([[1, 1], [2, 2], [3, 1]], label=0)),
-                content_type="application/json",
-                headers=_auth(self.worker),
-            )
-        self.assertEqual(res.status_code, 200, res.content)
-        new_id = res.json()["to_annotation_id"]
+            for i in range(3):
+                res = self.client.post(
+                    f"{self._base_url(session_id)}/commit",
+                    data=json.dumps(
+                        _commit_body([[i * 10, 0], [i * 10 + 5, 5], [i * 10, 10]], label=i)
+                    ),
+                    content_type="application/json",
+                    headers=_auth(self.worker),
+                )
+                self.assertEqual(res.status_code, 200, res.content)
+                self.assertEqual(res.json()["status"], "editing")
 
-        op = Operation.objects.get(to_annotation_id=new_id)
-        self.assertEqual(op.action, "modify")
-        self.assertEqual(op.source, "interactive")
-        self.assertEqual(op.from_annotation_id, original.id)
-        original.refresh_from_db()
-        self.assertFalse(original.is_active)
+        # Three annotations, each with action="add".
+        ops = list(
+            Operation.objects.filter(
+                image=self.image, source="interactive"
+            ).order_by("created_at")
+        )
+        self.assertEqual(len(ops), 3)
+        for op in ops:
+            self.assertEqual(op.action, "add")
+            self.assertIsNone(op.from_annotation_id)
+
+        # Three interactive operations linked to the same session.
+        steps = InteractiveInferenceOperation.objects.filter(session_id=session_id)
+        self.assertEqual(steps.count(), 3)
+        for step in steps:
+            self.assertIsNotNone(step.annotation_id)
 
     def test_commit_missing_geometry_422(self):
         prov = self._make_provider(project=self.project)
@@ -374,7 +429,7 @@ class InteractiveSessionTests(InteractiveBaseTest):
         session_id = self._start_session(prov).json()["id"]
         with patch(
             "anno_infers.services.httpx.post", return_value=_handshake_response()
-        ):
+        ) as complete_mock:
             res = self.client.post(
                 f"{self._base_url(session_id)}/discard",
                 headers=_auth(self.worker),
@@ -383,6 +438,8 @@ class InteractiveSessionTests(InteractiveBaseTest):
         self.assertEqual(res.json()["status"], "discarded")
         self.assertEqual(Annotation2D.objects.filter(image=self.image).count(), 0)
         self.assertEqual(Operation.objects.filter(image=self.image).count(), 0)
+        # Session completion is called on discard.
+        complete_mock.assert_called_once()
 
     def test_commit_after_discard_conflict(self):
         prov = self._make_provider(project=self.project)
@@ -418,6 +475,111 @@ class InteractiveSessionTests(InteractiveBaseTest):
         )
         self.assertEqual(res.status_code, 200)
         body = res.json()
-        self.assertEqual(body["status"], "committed")
+        self.assertEqual(body["status"], "editing")
         self.assertEqual(len(body["steps"]), 1)
         self.assertEqual(body["steps"][0]["step_index"], 1)
+        self.assertIsNotNone(body["steps"][0]["annotation_id"])
+
+    def test_multiple_commits_same_session(self):
+        """One session can produce multiple annotations. Sessions stay editing."""
+        prov = self._make_provider(project=self.project)
+        session_id = self._start_session(prov).json()["id"]
+
+        with patch(
+            "anno_infers.services.httpx.post", return_value=_handshake_response()
+        ) as complete_mock:
+            # First commit
+            res1 = self.client.post(
+                f"{self._base_url(session_id)}/commit",
+                data=json.dumps(_commit_body([[0, 0], [1, 1], [2, 0]], label=1)),
+                content_type="application/json",
+                headers=_auth(self.worker),
+            )
+            self.assertEqual(res1.status_code, 200)
+            self.assertEqual(res1.json()["status"], "editing")
+
+            # Second commit
+            res2 = self.client.post(
+                f"{self._base_url(session_id)}/commit",
+                data=json.dumps(_commit_body([[3, 3], [4, 4], [5, 3]], label=2)),
+                content_type="application/json",
+                headers=_auth(self.worker),
+            )
+            self.assertEqual(res2.status_code, 200)
+            self.assertEqual(res2.json()["status"], "editing")
+
+        # Session must NOT have been completed — session is still alive.
+        complete_mock.assert_not_called()
+
+        # Both operations have annotation links.
+        ops = list(
+            InteractiveInferenceOperation.objects.filter(
+                session_id=session_id
+            ).order_by("step_index")
+        )
+        self.assertEqual(len(ops), 2)
+        ann1_id = ops[0].annotation_id
+        ann2_id = ops[1].annotation_id
+        self.assertIsNotNone(ann1_id)
+        self.assertIsNotNone(ann2_id)
+        self.assertNotEqual(ann1_id, ann2_id)
+
+        ann1 = Annotation2D.objects.get(id=ann1_id)
+        ann2 = Annotation2D.objects.get(id=ann2_id)
+        self.assertTrue(ann1.is_active)
+        self.assertTrue(ann2.is_active)
+
+        session = InteractiveInferenceSession.objects.get(id=session_id)
+        self.assertEqual(session.status, "editing")
+
+        # Reverse-trace works for both annotations.
+        for iop in ops:
+            audit_op = Operation.objects.get(to_annotation_id=iop.annotation_id)
+            traced = InteractiveInferenceOperation.objects.get(
+                annotation_id=audit_op.to_annotation_id
+            )
+            self.assertEqual(traced.session_id, session.id)
+
+    def test_discard_after_commit(self):
+        """Discard ends the session. Committed annotations survive."""
+        prov = self._make_provider(project=self.project)
+        session_id = self._start_session(prov).json()["id"]
+
+        with patch(
+            "anno_infers.services.httpx.post", return_value=_handshake_response()
+        ) as complete_mock:
+            # Commit one annotation.
+            res = self.client.post(
+                f"{self._base_url(session_id)}/commit",
+                data=json.dumps(_commit_body([[0, 0], [1, 1], [2, 0]], label=1)),
+                content_type="application/json",
+                headers=_auth(self.worker),
+            )
+            self.assertEqual(res.status_code, 200)
+
+            # Discard the session.
+            res = self.client.post(
+                f"{self._base_url(session_id)}/discard",
+                headers=_auth(self.worker),
+            )
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual(res.json()["status"], "discarded")
+
+        # Completion was called exactly once (on discard, not on commit).
+        complete_mock.assert_called_once()
+
+        # Annotation survives discard.
+        iop = InteractiveInferenceOperation.objects.get(
+            session_id=session_id, step_index=1
+        )
+        ann = Annotation2D.objects.get(id=iop.annotation_id)
+        self.assertTrue(ann.is_active)
+
+        # Further commit is rejected.
+        res = self.client.post(
+            f"{self._base_url(session_id)}/commit",
+            data=json.dumps(_commit_body([[3, 3], [4, 4], [5, 3]], label=2)),
+            content_type="application/json",
+            headers=_auth(self.worker),
+        )
+        self.assertEqual(res.status_code, 409)
