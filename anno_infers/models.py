@@ -63,7 +63,7 @@ class InferenceServiceProvider(models.Model):
     name = models.CharField(max_length=255, help_text="Human label, e.g. 'SAM-2 box->mask'.")
     model_name = models.CharField(max_length=255, blank=True, default="")
     description = models.TextField(blank=True, default="")
-    inference_url = models.URLField(max_length=1024, help_text="The service's predict endpoint.")
+    inference_url = models.URLField(max_length=1024, help_text="The service's base URL (e.g., https://infer.example.com). The platform appends standard SDK paths (/predict, /session, etc.) automatically.")
 
     supported_result_types = models.JSONField(
         default=list,
@@ -330,7 +330,7 @@ class InteractiveInferenceServiceProvider(models.Model):
     name = models.CharField(max_length=255, help_text="Human label, e.g. 'SAM-2 interactive'.")
     model_name = models.CharField(max_length=255, blank=True, default="")
     description = models.TextField(blank=True, default="")
-    inference_url = models.URLField(max_length=1024, help_text="The service's predict endpoint.")
+    inference_url = models.URLField(max_length=1024, help_text="The service's base URL (e.g., https://infer.example.com). The platform appends standard SDK paths (/predict, /session, etc.) automatically.")
 
     supported_prompt_types = models.JSONField(
         default=list,
@@ -394,19 +394,21 @@ class InteractiveInferenceServiceProvider(models.Model):
 class InteractiveInferenceSession(models.Model):
     """One user's interactive prompting session over a single image.
 
-    The user refines a candidate through repeated prompts and may finally commit
-    it as an ``Annotation2D``. Given an ``Operation`` with
-    ``source == "interactive"``, the session is reverse-traceable via
-    ``InteractiveInferenceSession.objects.get(final_annotation_id=operation.to_annotation_id)``.
+    One session can produce multiple annotations — commit does *not* end the
+    session; only an explicit discard does. Each commit creates an
+    ``Annotation2D`` and an ``InteractiveInferenceOperation`` linked to it.
+
+    To reverse-trace from an audit ``Operation`` (``source == "interactive"``)
+    back to the session that produced it, use
+    ``InteractiveInferenceOperation.objects.get(
+    annotation_id=op.to_annotation_id).session``.
     """
 
     STATUS_EDITING = "editing"
-    STATUS_COMMITTED = "committed"
     STATUS_DISCARDED = "discarded"
     STATUS_FAILED = "failed"
     STATUS_CHOICES = [
         (STATUS_EDITING, "Editing"),
-        (STATUS_COMMITTED, "Committed"),
         (STATUS_DISCARDED, "Discarded"),
         (STATUS_FAILED, "Failed"),
     ]
@@ -431,36 +433,29 @@ class InteractiveInferenceSession(models.Model):
         on_delete=models.PROTECT,
         related_name="interactive_inference_sessions",
     )
-    from_annotation = models.ForeignKey(
-        "anno_images.Annotation2D",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="interactive_sessions_as_from",
-        help_text="Original annotation when refining an existing one (null for new).",
-    )
-    final_annotation = models.ForeignKey(
-        "anno_images.Annotation2D",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="interactive_session",
-        help_text="The committed annotation (null until committed); reverse-lookup target.",
-    )
     status = models.CharField(
         max_length=12, choices=STATUS_CHOICES, default=STATUS_EDITING, db_index=True
     )
+    session_token = models.CharField(
+        max_length=128,
+        blank=True,
+        null=True,
+        unique=True,
+        default=None,
+        help_text="Short-lived token the service minted for browser→service calls. "
+        "NULL until the handshake succeeds; unique thereafter.",
+    )
     error = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
-    committed_at = models.DateTimeField(null=True, blank=True)
-    discarded_at = models.DateTimeField(null=True, blank=True)
+    # ``updated_at`` is bumped on every commit and on discard, serving as the
+    # ended-at timestamp only when ``status`` is terminal (discarded/failed).
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "anno_interactive_session"
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["project", "status"]),
-            models.Index(fields=["final_annotation"]),
         ]
 
     def __str__(self) -> str:
@@ -471,12 +466,23 @@ class InteractiveInferenceOperation(models.Model):
     """One step within a session: a set of prompts and the model's candidate.
 
     This is *not* an audit :class:`~anno_images.models.Operation`; it records the
-    interaction only. A real ``Operation`` is created solely when the session is
-    committed.
+    interaction only. When a step is committed, ``annotation`` links to the
+    resulting ``Annotation2D``, providing a reverse-trace from audit ``Operation``
+    back to the session:
+    ``InteractiveInferenceOperation.objects.get(
+    annotation_id=audit_op.to_annotation_id).session``.
     """
 
     session = models.ForeignKey(
         InteractiveInferenceSession, on_delete=models.CASCADE, related_name="operations"
+    )
+    annotation = models.ForeignKey(
+        "anno_images.Annotation2D",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="interactive_operations",
+        help_text="The Annotation2D created by this operation step (null until committed).",
     )
     step_index = models.PositiveIntegerField(help_text="Step number within the session, from 1.")
     prompt = models.JSONField(

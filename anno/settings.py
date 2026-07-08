@@ -185,6 +185,13 @@ CACHES = {
 # The model service must be able to reach this URL to post results back.
 INFERS_BASE_URL = os.environ.get("INFERS_BASE_URL", "http://localhost:8000")
 
+# TTL hint sent to an interactive inference service when opening a session. The
+# service mints the short-lived browser token and is free to honour or override
+# this; the handshake response's expiry is authoritative.
+INTERACTIVE_SESSION_TOKEN_TTL_SECONDS = int(
+    os.environ.get("INTERACTIVE_SESSION_TOKEN_TTL_SECONDS", "1800")
+)
+
 # Background tasks (django-tasks + django-tasks-db).
 # The DatabaseBackend stores enqueued tasks in Postgres; run a worker with
 # `python manage.py db_worker`. Auto-annotation jobs (anno_infers) enqueue here.

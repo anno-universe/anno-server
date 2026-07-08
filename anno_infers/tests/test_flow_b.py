@@ -81,7 +81,7 @@ class FlowBBaseTest(TestCase):
     def _make_provider(self, *, project=None, types=("box", "polygon"), **kw):
         defaults = dict(
             name="prov",
-            inference_url="http://svc.local/predict",
+            inference_url="http://svc.local",
             supported_result_types=list(types),
             created_by=self.supervisor,
         )
@@ -98,7 +98,7 @@ class ProviderRegistryTests(FlowBBaseTest):
     def test_create_provider_supervisor(self):
         body = {
             "name": "SAM",
-            "inference_url": "http://svc/predict",
+            "inference_url": "http://svc",
             "supported_result_types": ["box"],
             "auth_type": "header",
             "auth_param_name": "X-API-Key",
@@ -123,7 +123,7 @@ class ProviderRegistryTests(FlowBBaseTest):
     def test_create_provider_worker_forbidden(self):
         body = {
             "name": "x",
-            "inference_url": "http://svc/predict",
+            "inference_url": "http://svc",
             "supported_result_types": ["box"],
         }
         res = self.client.post(
@@ -137,7 +137,7 @@ class ProviderRegistryTests(FlowBBaseTest):
     def test_invalid_result_type_rejected(self):
         body = {
             "name": "x",
-            "inference_url": "http://svc/predict",
+            "inference_url": "http://svc",
             "supported_result_types": ["bogus"],
         }
         res = self.client.post(

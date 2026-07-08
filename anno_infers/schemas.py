@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from django.conf import settings
-from ninja import Schema
+from ninja import Field, Schema
 from pydantic import field_validator
 
 from anno_images.schemas import Box2DDataInput, Keypoint2DDataInput, Polygon2DDataInput
@@ -156,7 +156,7 @@ def _validate_result_types(value: list[str]) -> list[str]:
 
 class ProviderCreateInput(Schema):
     name: str
-    inference_url: str
+    inference_url: str = Field(description="The service's base URL (e.g., https://infer.example.com). /predict will be appended by the platform.")
     supported_result_types: list[str]
     model_name: str = ""
     description: str = ""
@@ -183,7 +183,7 @@ class ProviderUpdateInput(Schema):
     """Partial update; all fields optional. ``auth_secret`` is write-only."""
 
     name: str | None = None
-    inference_url: str | None = None
+    inference_url: str | None = Field(default=None, description="The service's base URL (e.g., https://infer.example.com). /predict will be appended by the platform.")
     supported_result_types: list[str] | None = None
     model_name: str | None = None
     description: str | None = None
@@ -218,7 +218,7 @@ class ProviderOutput(Schema):
     name: str
     model_name: str
     description: str
-    inference_url: str
+    inference_url: str = Field(description="The service's base URL (e.g., https://infer.example.com). /predict will be appended by the platform.")
     supported_result_types: list[str]
     auth_type: str
     auth_param_name: str
@@ -411,7 +411,7 @@ def _validate_prompt_types(value: list[str]) -> list[str]:
 
 class InteractiveProviderCreateInput(Schema):
     name: str
-    inference_url: str
+    inference_url: str = Field(description="The service's base URL (e.g., https://infer.example.com). /session will be appended by the platform.")
     supported_prompt_types: list[str]
     supported_result_types: list[str]
     model_name: str = ""
@@ -444,7 +444,7 @@ class InteractiveProviderUpdateInput(Schema):
     """Partial update; all fields optional. ``auth_secret`` is write-only."""
 
     name: str | None = None
-    inference_url: str | None = None
+    inference_url: str | None = Field(default=None, description="The service's base URL (e.g., https://infer.example.com). /session will be appended by the platform.")
     supported_prompt_types: list[str] | None = None
     supported_result_types: list[str] | None = None
     model_name: str | None = None
@@ -480,7 +480,7 @@ class InteractiveProviderOutput(Schema):
     name: str
     model_name: str
     description: str
-    inference_url: str
+    inference_url: str = Field(description="The service's base URL (e.g., https://infer.example.com). /session will be appended by the platform.")
     supported_prompt_types: list[str]
     supported_result_types: list[str]
     auth_type: str
@@ -520,23 +520,25 @@ class InteractiveSessionStartInput(Schema):
     """Open an interactive session on an image (image_id comes from the URL)."""
 
     provider_id: int
-    from_annotation_id: int | None = None
-
-
-class InteractiveStepInput(Schema):
-    """Submit a set of prompts for the next step.
-
-    Each prompt is an open dict tagged with ``type`` (box / positive_point /
-    negative_point / mask / text) plus prompt-specific keys.
-    """
-
-    prompts: list[dict]
 
 
 class InteractiveCommitInput(Schema):
-    """Commit a chosen step's candidate as a real annotation."""
+    """Commit the user's chosen candidate as a real annotation.
 
-    step_id: int
+    In the direct-call flow the per-prompt loop runs browser -> service, so the
+    server never saw the intermediate steps; the frontend sends the final
+    prompts (for audit) plus the chosen geometry here. Exactly one geometry
+    field must match ``annotation_type``.
+    """
+
+    annotation_type: str
+    label: int | None = None
+    polygon: Polygon2DDataInput | None = None
+    box: Box2DDataInput | None = None
+    keypoint: Keypoint2DDataInput | None = None
+    prompts: list[dict] = []
+    score: float | None = None
+    model_version: str = ""
 
 
 class InteractiveStepOutput(Schema):
@@ -547,6 +549,7 @@ class InteractiveStepOutput(Schema):
     result: dict
     result_type: str
     result_data: dict
+    annotation_id: int | None
     error: str
     created_at: datetime
 
@@ -560,6 +563,7 @@ class InteractiveStepOutput(Schema):
             result=op.result,
             result_type=op.result_type,
             result_data=op.result_data,
+            annotation_id=op.annotation_id,
             error=op.error,
             created_at=op.created_at,
         )
@@ -571,13 +575,10 @@ class InteractiveSessionOutput(Schema):
     image_id: int
     provider_id: int
     performed_by_id: int
-    from_annotation_id: int | None
-    final_annotation_id: int | None
     status: str
     error: str
     created_at: datetime
-    committed_at: datetime | None
-    discarded_at: datetime | None
+    updated_at: datetime
 
     @staticmethod
     def from_session(s) -> "InteractiveSessionOutput":
@@ -587,14 +588,29 @@ class InteractiveSessionOutput(Schema):
             image_id=s.image_id,
             provider_id=s.provider_id,
             performed_by_id=s.performed_by_id,
-            from_annotation_id=s.from_annotation_id,
-            final_annotation_id=s.final_annotation_id,
             status=s.status,
             error=s.error,
             created_at=s.created_at,
-            committed_at=s.committed_at,
-            discarded_at=s.discarded_at,
+            updated_at=s.updated_at,
         )
+
+
+class InteractiveSessionStartOutput(InteractiveSessionOutput):
+    """Session record plus the short-lived credential for the direct calls.
+
+    The frontend presents ``token`` in the ``token_header`` header on its direct
+    calls to the service — ``{predict_url}/{id}/infer_image`` (upload the image
+    once) and ``{predict_url}/{id}/predict`` (per prompt). ``token_expires_at`` is
+    the service-reported ISO-8601 expiry.
+    """
+
+    token: str
+    token_header: str
+    token_expires_at: str | None = None
+    predict_url: str | None = None
+    session_ref: str | None = None
+    supported_prompt_types: list[str] = []
+    supported_result_types: list[str] = []
 
 
 class InteractiveSessionDetailOutput(InteractiveSessionOutput):

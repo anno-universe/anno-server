@@ -1,4 +1,4 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 
 from .models import (
     InferenceResult,
@@ -9,6 +9,7 @@ from .models import (
     InteractiveInferenceServiceProvider,
     InteractiveInferenceSession,
 )
+from .services import complete_interactive_session
 
 
 @admin.register(InferenceServiceProvider)
@@ -94,13 +95,14 @@ class InteractiveInferenceServiceProviderAdmin(admin.ModelAdmin):
     list_filter = ("is_active", "auth_type", "project")
     search_fields = ("name", "model_name", "inference_url")
     raw_id_fields = ("project", "created_by")
+    actions = []
 
 
 class InteractiveInferenceOperationInline(admin.TabularInline):
     model = InteractiveInferenceOperation
     extra = 0
     can_delete = False
-    readonly_fields = ("step_index", "result_type", "result", "error", "created_at")
+    readonly_fields = ("step_index", "result_type", "result", "annotation", "error", "created_at")
     fields = readonly_fields
 
 
@@ -112,10 +114,26 @@ class InteractiveInferenceSessionAdmin(admin.ModelAdmin):
         "image",
         "provider",
         "status",
-        "final_annotation",
         "created_at",
     )
     list_filter = ("status", "project")
-    raw_id_fields = ("project", "image", "provider", "performed_by", "from_annotation", "final_annotation")
-    readonly_fields = ("created_at", "committed_at", "discarded_at")
+    raw_id_fields = ("project", "image", "provider", "performed_by")
+    readonly_fields = ("created_at", "updated_at")
     inlines = [InteractiveInferenceOperationInline]
+    actions = ["force_discard_selected"]
+
+    @admin.action(description="Force discard selected sessions")
+    def force_discard_selected(self, request, queryset):
+        count = 0
+        for session in queryset.filter(status=InteractiveInferenceSession.STATUS_EDITING):
+            session.status = InteractiveInferenceSession.STATUS_DISCARDED
+            session.save(update_fields=["status", "updated_at"])
+            complete_interactive_session(
+                provider=session.provider, session_id=session.id
+            )
+            count += 1
+        self.message_user(
+            request,
+            f"Force-discarded {count} session(s).",
+            messages.SUCCESS,
+        )

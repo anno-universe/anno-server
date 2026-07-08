@@ -16,8 +16,8 @@ from ninja_jwt.authentication import JWTAuth
 
 from anno.pagination import PaginatedResponse, paginate_queryset
 from anno_images.controllers import _presigned_redirect
-from anno_images.models import Annotation2D, Image2D
-from anno_projects.models import Project
+from anno_images.models import Annotation2D, Image2D, Operation
+from anno_projects.models import Project, ProjectMembership
 from anno_projects.permissions import IsProjectMemberOrAdmin, IsProjectSupervisorOrAdmin
 
 from .auth import ProjectAPIKeyAuth
@@ -27,6 +27,7 @@ from .models import (
     InferenceTask,
     InteractiveInferenceServiceProvider,
     InteractiveInferenceSession,
+    InteractiveInferenceOperation,
 )
 from .schemas import (
     AutoAnnotateInput,
@@ -38,8 +39,7 @@ from .schemas import (
     InteractiveSessionDetailOutput,
     InteractiveSessionOutput,
     InteractiveSessionStartInput,
-    InteractiveStepInput,
-    InteractiveStepOutput,
+    InteractiveSessionStartOutput,
     ProjectAnnotationBatchOutput,
     ProjectAnnotationModifyOutput,
     ProjectAnnotationResultItem,
@@ -54,16 +54,13 @@ from .schemas import (
     RunOutput,
     TaskDetailOutput,
 )
-from .services import (
-    commit_interactive_session,
-    create_ai_annotation,
-    discard_interactive_session,
-    modify_ai_annotation,
-    provider_snapshot,
-    run_interactive_step,
-    start_interactive_session,
-)
+from . import services
+from .services import create_ai_annotation, modify_ai_annotation, provider_snapshot
 from .tasks import run_inference_run
+
+#: Header the browser presents the session token in on its direct service calls.
+#: Matches the anno-sdk interactive server default (``X-Session-Token``).
+INTERACTIVE_TOKEN_HEADER = "X-Session-Token"
 
 # ---------------------------------------------------------------------------
 # Project inference endpoints (API-key auth; project implied by the key)
@@ -618,8 +615,10 @@ class ImageAutoAnnotateController:
 # ---------------------------------------------------------------------------
 # Interactive inference provider registry (JWT)
 #
-# Same scoping model as InferenceProviderController: global (project=null,
-# admin-managed) or project-scoped (supervisor-managed). Members can list.
+# Mirrors InferenceProviderController for prompt-driven (SAM/SAM2/MedSAM)
+# services. Providers are global (admin-managed) or project-scoped (supervisor
+# managed). ``auth_secret`` is the outbound credential the server presents on
+# the session handshake; it is never serialized.
 # ---------------------------------------------------------------------------
 
 
@@ -631,9 +630,9 @@ def _visible_interactive_providers(project_id: int):
 
 
 @api_controller(
-    "/projects/{project_id}/interactive-providers", tags=["interactive-providers"]
+    "/projects/{project_id}/interactive-providers", tags=["infer-interactive"]
 )
-class InteractiveProviderController:
+class InteractiveInferenceProviderController:
 
     @http_get(
         "/",
@@ -699,7 +698,11 @@ class InteractiveProviderController:
         url_name="interactive_provider_update",
     )
     def update(
-        self, request, project_id: int, provider_id: int, payload: InteractiveProviderUpdateInput
+        self,
+        request,
+        project_id: int,
+        provider_id: int,
+        payload: InteractiveProviderUpdateInput,
     ):
         # Only project-scoped providers are editable here; globals are admin-managed.
         provider = get_object_or_404(
@@ -726,39 +729,62 @@ class InteractiveProviderController:
 
 
 # ---------------------------------------------------------------------------
-# Interactive inference sessions (JWT, member-level)
+# Interactive inference sessions (JWT)
 #
-# A user opens a session on an image, submits prompt steps (each a synchronous
-# provider call returning a candidate), and finally commits a chosen step's
-# candidate as a real Annotation2D (Operation.source="interactive") or discards.
+# Direct-call flow: the server opens a session (server->service handshake that
+# yields a short-lived browser token), the browser runs the prompt loop against
+# the service directly, then commits the chosen candidate back here. The server
+# persists the final annotation immutably (source="interactive") and releases
+# the service's seat (best-effort). See anno_infers/services.py.
 # ---------------------------------------------------------------------------
+
+
+def _finalizable_by(request, project_id: int, session) -> bool:
+    """The session owner, a project supervisor, or a system admin may finalize."""
+    user = request.user
+    if session.performed_by_id == user.id:
+        return True
+    if user.groups.filter(name="admin").exists():
+        return True
+    return ProjectMembership.objects.filter(
+        project_id=project_id, user=user, role="supervisor"
+    ).exists()
+
+
+def _commit_geometry(payload: InteractiveCommitInput):
+    """Return the geometry input matching ``annotation_type`` or raise 422."""
+    geo = {
+        "polygon": payload.polygon,
+        "box": payload.box,
+        "keypoint": payload.keypoint,
+    }.get(payload.annotation_type)
+    if geo is None:
+        raise HttpError(
+            422, f"Missing '{payload.annotation_type}' geometry for commit."
+        )
+    return geo
 
 
 @api_controller(
     "/projects/{project_id}/images/{image_id}/interactive-sessions",
-    tags=["interactive-sessions"],
+    tags=["infer-interactive"],
 )
 class InteractiveSessionController:
-
-    def _get_session(self, project_id, image_id, session_id, *, editing=False):
-        qs = InteractiveInferenceSession.objects.select_related(
-            "project", "image", "provider", "from_annotation"
-        )
-        session = get_object_or_404(
-            qs, id=session_id, project_id=project_id, image_id=image_id
-        )
-        if editing and session.status != InteractiveInferenceSession.STATUS_EDITING:
-            raise HttpError(409, f"Session is {session.status}, not editing.")
-        return session
 
     @http_post(
         "/",
         permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
         auth=JWTAuth(),
-        response={201: InteractiveSessionOutput},
+        response={201: InteractiveSessionStartOutput},
         url_name="interactive_session_start",
     )
-    def start(self, request, project_id: int, image_id: int, payload: InteractiveSessionStartInput):
+    def start(
+        self,
+        request,
+        project_id: int,
+        image_id: int,
+        payload: InteractiveSessionStartInput,
+    ):
         project = get_object_or_404(Project, id=project_id)
         image = get_object_or_404(Image2D, id=image_id, project=project)
 
@@ -768,46 +794,55 @@ class InteractiveSessionController:
             .first()
         )
         if provider is None:
-            raise HttpError(404, "Active interactive provider not found for this project.")
-
-        from_annotation = None
-        if payload.from_annotation_id is not None:
-            from_annotation = get_object_or_404(
-                Annotation2D,
-                id=payload.from_annotation_id,
-                image=image,
-                project=project,
-                is_active=True,
+            raise HttpError(
+                404, "Active interactive provider not found for this project."
             )
 
-        session = start_interactive_session(
+        session = InteractiveInferenceSession.objects.create(
             project=project,
             image=image,
             provider=provider,
             performed_by=request.user,
-            from_annotation=from_annotation,
         )
-        return 201, InteractiveSessionOutput.from_session(session)
 
-    @http_post(
-        "/{session_id}/steps",
-        permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
-        auth=JWTAuth(),
-        response={201: InteractiveStepOutput},
-        url_name="interactive_session_step",
-    )
-    def add_step(
-        self, request, project_id: int, image_id: int, session_id: int, payload: InteractiveStepInput
-    ):
-        session = self._get_session(project_id, image_id, session_id, editing=True)
         try:
-            operation = run_interactive_step(session, payload.prompts)
-        except ValueError as exc:
-            raise HttpError(422, str(exc))
+            handshake = services.open_interactive_session(
+                provider=provider,
+                session=session,
+                ttl_seconds=django_settings.INTERACTIVE_SESSION_TOKEN_TTL_SECONDS,
+                label_mapping=project.label_mapping,
+                requested_types=provider.supported_result_types,
+                width=image.width,
+                height=image.height,
+            )
         except Exception as exc:
-            # Provider call failed; the step was recorded with its error.
-            raise HttpError(502, f"Interactive provider call failed: {exc}")
-        return 201, InteractiveStepOutput.from_operation(operation)
+            session.status = InteractiveInferenceSession.STATUS_FAILED
+            session.error = f"session handshake failed: {exc}"
+            session.save(update_fields=["status", "error", "updated_at"])
+            logger.warning(
+                "Interactive session %d: handshake with provider %d failed: %s",
+                session.id,
+                provider.id,
+                exc,
+            )
+            raise HttpError(
+                502, "Failed to open a session with the interactive inference service."
+            )
+
+        session.session_token = handshake.token
+        session.save(update_fields=["session_token"])
+
+        base = InteractiveSessionOutput.from_session(session)
+        return 201, InteractiveSessionStartOutput(
+            **base.dict(),
+            token=handshake.token,
+            token_header=INTERACTIVE_TOKEN_HEADER,
+            token_expires_at=handshake.expires_at,
+            predict_url=handshake.predict_url or provider.inference_url.rstrip("/"),
+            session_ref=handshake.session_ref,
+            supported_prompt_types=list(provider.supported_prompt_types),
+            supported_result_types=list(provider.supported_result_types),
+        )
 
     @http_get(
         "/{session_id}",
@@ -833,16 +868,55 @@ class InteractiveSessionController:
         url_name="interactive_session_commit",
     )
     def commit(
-        self, request, project_id: int, image_id: int, session_id: int, payload: InteractiveCommitInput
+        self,
+        request,
+        project_id: int,
+        image_id: int,
+        session_id: int,
+        payload: InteractiveCommitInput,
     ):
-        session = self._get_session(project_id, image_id, session_id, editing=True)
-        operation = get_object_or_404(
-            session.operations, id=payload.step_id
+        session = get_object_or_404(
+            InteractiveInferenceSession,
+            id=session_id,
+            project_id=project_id,
+            image_id=image_id,
         )
-        try:
-            commit_interactive_session(session, operation)
-        except ValueError as exc:
-            raise HttpError(422, str(exc))
+        if not _finalizable_by(request, project_id, session):
+            raise HttpError(403, "You cannot commit this session.")
+        if session.status != InteractiveInferenceSession.STATUS_EDITING:
+            raise HttpError(409, f"Session is {session.status}, not editing.")
+
+        geometry = _commit_geometry(payload)
+
+        with transaction.atomic():
+            step_index = session.operations.count() + 1
+
+            annotation = create_ai_annotation(
+                image=session.image,
+                project=session.project,
+                annotation_type=payload.annotation_type,
+                label=payload.label,
+                polygon=payload.polygon,
+                box=payload.box,
+                keypoint=payload.keypoint,
+                performed_by=request.user,
+                source=Operation.SOURCE_INTERACTIVE,
+            )
+
+            InteractiveInferenceOperation.objects.create(
+                session=session,
+                step_index=step_index,
+                prompt={"prompts": payload.prompts},
+                result={"score": payload.score, "model_version": payload.model_version},
+                result_type=payload.annotation_type,
+                result_data=geometry.dict(),
+                annotation=annotation,
+            )
+
+            # Keep session editing — only discard ends it.
+
+        # Deliberately do NOT call complete_interactive_session here.
+        # The session stays alive; only discard releases the service seat.
         return 200, InteractiveSessionOutput.from_session(session)
 
     @http_post(
@@ -853,6 +927,34 @@ class InteractiveSessionController:
         url_name="interactive_session_discard",
     )
     def discard(self, request, project_id: int, image_id: int, session_id: int):
-        session = self._get_session(project_id, image_id, session_id, editing=True)
-        discard_interactive_session(session)
+        session = get_object_or_404(
+            InteractiveInferenceSession,
+            id=session_id,
+            project_id=project_id,
+            image_id=image_id,
+        )
+        if not _finalizable_by(request, project_id, session):
+            raise HttpError(403, "You cannot discard this session.")
+        if session.status != InteractiveInferenceSession.STATUS_EDITING:
+            raise HttpError(409, f"Session is {session.status}, not editing.")
+
+        session.status = InteractiveInferenceSession.STATUS_DISCARDED
+        session.save(update_fields=["status", "updated_at"])
+
+        services.complete_interactive_session(
+            provider=session.provider, session_id=session.id
+        )
         return 200, InteractiveSessionOutput.from_session(session)
+
+
+# ---------------------------------------------------------------------------
+# Interactive seat management — unified, project-independent controller
+#
+# Seat operations are at a project-free prefix because providers (especially
+# global ones) are shared across projects.  Authorization determines scope:
+#   • admin      — sees and can release seats for any project
+#   • supervisor — only seats in projects they supervise
+#   • others     — 403
+# ---------------------------------------------------------------------------
+
+

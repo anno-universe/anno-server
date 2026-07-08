@@ -104,7 +104,7 @@
     },
     "/api/users/register": {
       "post": {
-        "operationId": "user_register_3ad109c7",
+        "operationId": "user_register_b4d9d5f6",
         "summary": "Register",
         "parameters": [],
         "responses": {
@@ -136,7 +136,7 @@
     },
     "/api/users/me": {
       "get": {
-        "operationId": "user_profile_2f0e0fa4",
+        "operationId": "user_profile_b03c609f",
         "summary": "Profile",
         "parameters": [],
         "responses": {
@@ -161,7 +161,7 @@
         ]
       },
       "patch": {
-        "operationId": "user_update_profile_4c8a61d9",
+        "operationId": "user_update_profile_a288efd3",
         "summary": "Update Profile",
         "parameters": [],
         "responses": {
@@ -198,7 +198,7 @@
     },
     "/api/users/search": {
       "get": {
-        "operationId": "user_search_users_ba7bb214",
+        "operationId": "user_search_users_b687fa2b",
         "summary": "Search Users",
         "parameters": [
           {
@@ -255,7 +255,7 @@
     },
     "/api/projects/": {
       "post": {
-        "operationId": "project_create_0cbf50cc",
+        "operationId": "project_create_9cd62389",
         "summary": "Create",
         "parameters": [],
         "responses": {
@@ -290,7 +290,7 @@
         ]
       },
       "get": {
-        "operationId": "project_list_projects_da842145",
+        "operationId": "project_list_projects_94575f83",
         "summary": "List Projects",
         "parameters": [
           {
@@ -338,7 +338,7 @@
     },
     "/api/projects/{project_id}": {
       "get": {
-        "operationId": "project_detail_803519c2",
+        "operationId": "project_detail_d7d382aa",
         "summary": "Detail",
         "parameters": [
           {
@@ -373,7 +373,7 @@
         ]
       },
       "patch": {
-        "operationId": "project_update_bbb0d1ea",
+        "operationId": "project_update_926ead00",
         "summary": "Update",
         "parameters": [
           {
@@ -418,7 +418,7 @@
         ]
       },
       "delete": {
-        "operationId": "project_delete_ba99f492",
+        "operationId": "project_delete_a989b871",
         "summary": "Delete",
         "parameters": [
           {
@@ -448,7 +448,7 @@
     },
     "/api/projects/{project_id}/members": {
       "get": {
-        "operationId": "project_list_members_960262d1",
+        "operationId": "project_list_members_2542cfd4",
         "summary": "List Members",
         "parameters": [
           {
@@ -503,7 +503,7 @@
         ]
       },
       "post": {
-        "operationId": "project_add_member_2528a566",
+        "operationId": "project_add_member_4a4b6ea0",
         "summary": "Add Member",
         "parameters": [
           {
@@ -550,7 +550,7 @@
     },
     "/api/projects/{project_id}/members/{user_id}": {
       "patch": {
-        "operationId": "project_update_member_role_83adf136",
+        "operationId": "project_update_member_role_ec213366",
         "summary": "Update Member Role",
         "parameters": [
           {
@@ -604,7 +604,7 @@
         ]
       },
       "delete": {
-        "operationId": "project_remove_member_ac932a01",
+        "operationId": "project_remove_member_91d093c8",
         "summary": "Remove Member",
         "parameters": [
           {
@@ -643,7 +643,7 @@
     },
     "/api/projects/{project_id}/api-keys/": {
       "post": {
-        "operationId": "apikey_create_f4f9b9c0",
+        "operationId": "apikey_create_5d6722a0",
         "summary": "Create",
         "parameters": [
           {
@@ -688,7 +688,7 @@
         ]
       },
       "get": {
-        "operationId": "apikey_list_keys_556276a5",
+        "operationId": "apikey_list_keys_d42630c3",
         "summary": "List Keys",
         "parameters": [
           {
@@ -745,7 +745,7 @@
     },
     "/api/projects/{project_id}/api-keys/{key_id}": {
       "get": {
-        "operationId": "apikey_detail_ee445be6",
+        "operationId": "apikey_detail_250db567",
         "summary": "Detail",
         "parameters": [
           {
@@ -789,7 +789,7 @@
         ]
       },
       "patch": {
-        "operationId": "apikey_update_af8a719b",
+        "operationId": "apikey_update_9b7499ff",
         "summary": "Update",
         "parameters": [
           {
@@ -843,7 +843,7 @@
         ]
       },
       "delete": {
-        "operationId": "apikey_delete_3c52fbec",
+        "operationId": "apikey_delete_0aabde5a",
         "summary": "Delete",
         "parameters": [
           {
@@ -882,7 +882,7 @@
     },
     "/api/projects/{project_id}/tags/": {
       "get": {
-        "operationId": "tag_list_tags_520d3622",
+        "operationId": "tag_list_tags_ddd8b4f8",
         "summary": "List Tags",
         "parameters": [
           {
@@ -953,7 +953,7 @@
         ]
       },
       "post": {
-        "operationId": "tag_create_9433891f",
+        "operationId": "tag_create_0c058897",
         "summary": "Create",
         "parameters": [
           {
@@ -1000,7 +1000,7 @@
     },
     "/api/projects/{project_id}/tags/stats": {
       "get": {
-        "operationId": "tag_tag_stats_e492428a",
+        "operationId": "tag_tag_stats_87415289",
         "summary": "Tag Stats",
         "parameters": [
           {
@@ -1037,7 +1037,7 @@
     },
     "/api/projects/{project_id}/tags/{tag_id}": {
       "get": {
-        "operationId": "tag_detail_280049ae",
+        "operationId": "tag_detail_f2979105",
         "summary": "Detail",
         "parameters": [
           {
@@ -1081,7 +1081,7 @@
         ]
       },
       "patch": {
-        "operationId": "tag_update_4f9306c7",
+        "operationId": "tag_update_14ed1856",
         "summary": "Update",
         "parameters": [
           {
@@ -1135,7 +1135,7 @@
         ]
       },
       "delete": {
-        "operationId": "tag_delete_2ecac69d",
+        "operationId": "tag_delete_528cfa47",
         "summary": "Delete",
         "parameters": [
           {
@@ -1174,7 +1174,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/tags/": {
       "get": {
-        "operationId": "imagetag_list_tags_d02f06ab",
+        "operationId": "imagetag_list_tags_18eae8dc",
         "summary": "List Tags",
         "parameters": [
           {
@@ -1222,7 +1222,7 @@
         ]
       },
       "post": {
-        "operationId": "imagetag_apply_98fb61f5",
+        "operationId": "imagetag_apply_6e987021",
         "summary": "Apply",
         "parameters": [
           {
@@ -1278,7 +1278,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/tags/{tag_id}": {
       "delete": {
-        "operationId": "imagetag_remove_e432283d",
+        "operationId": "imagetag_remove_fee704e0",
         "summary": "Remove",
         "parameters": [
           {
@@ -1326,7 +1326,7 @@
     },
     "/api/projects/{project_id}/images/": {
       "post": {
-        "operationId": "image2d_upload_634fc792",
+        "operationId": "image2d_upload_7ca2b01a",
         "summary": "Upload",
         "parameters": [
           {
@@ -1382,7 +1382,7 @@
         ]
       },
       "get": {
-        "operationId": "image2d_list_images_9dc83e1a",
+        "operationId": "image2d_list_images_faa1c5fd",
         "summary": "List Images",
         "parameters": [
           {
@@ -1455,7 +1455,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}": {
       "get": {
-        "operationId": "image2d_detail_53d8cf58",
+        "operationId": "image2d_detail_f07005b4",
         "summary": "Detail",
         "parameters": [
           {
@@ -1501,7 +1501,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/original_image": {
       "get": {
-        "operationId": "image2d_file_91236c75",
+        "operationId": "image2d_file_2c0e0f3c",
         "summary": "File",
         "parameters": [
           {
@@ -1540,7 +1540,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/thumbnail_image": {
       "get": {
-        "operationId": "image2d_thumbnail_541a0371",
+        "operationId": "image2d_thumbnail_1a928d23",
         "summary": "Thumbnail",
         "parameters": [
           {
@@ -1599,7 +1599,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/annotations/": {
       "post": {
-        "operationId": "annotation2d_create_3f7325de",
+        "operationId": "annotation2d_create_eca70bf6",
         "summary": "Create",
         "parameters": [
           {
@@ -1653,7 +1653,7 @@
         ]
       },
       "get": {
-        "operationId": "annotation2d_list_annotations_5ddd5c3c",
+        "operationId": "annotation2d_list_annotations_a12f56d6",
         "summary": "List Annotations",
         "parameters": [
           {
@@ -1719,7 +1719,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/annotations/{annotation_id}": {
       "get": {
-        "operationId": "annotation2d_detail_a1047cd3",
+        "operationId": "annotation2d_detail_776ab573",
         "summary": "Detail",
         "parameters": [
           {
@@ -1772,7 +1772,7 @@
         ]
       },
       "patch": {
-        "operationId": "annotation2d_modify_4479213a",
+        "operationId": "annotation2d_modify_5cbd1265",
         "summary": "Modify",
         "parameters": [
           {
@@ -1835,7 +1835,7 @@
         ]
       },
       "delete": {
-        "operationId": "annotation2d_delete_205b4008",
+        "operationId": "annotation2d_delete_beb4aa39",
         "summary": "Delete",
         "parameters": [
           {
@@ -1883,7 +1883,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/operations/": {
       "get": {
-        "operationId": "operation_list_operations_ef4ca909",
+        "operationId": "operation_list_operations_4fb8bd66",
         "summary": "List Operations",
         "parameters": [
           {
@@ -1949,7 +1949,7 @@
     },
     "/api/infers/project/meta": {
       "get": {
-        "operationId": "projectinfer_project_meta_f74cf276",
+        "operationId": "projectinfer_project_meta_2097e846",
         "summary": "Project Meta",
         "parameters": [],
         "responses": {
@@ -1976,7 +1976,7 @@
     },
     "/api/infers/project/images": {
       "get": {
-        "operationId": "projectinfer_list_images_40ef7218",
+        "operationId": "projectinfer_list_images_f998d6c6",
         "summary": "List Images",
         "parameters": [
           {
@@ -2040,7 +2040,7 @@
     },
     "/api/infers/project/images/{image_id}": {
       "get": {
-        "operationId": "projectinfer_image_detail_abe823e9",
+        "operationId": "projectinfer_image_detail_32050922",
         "summary": "Image Detail",
         "parameters": [
           {
@@ -2077,7 +2077,7 @@
     },
     "/api/infers/project/images/{image_id}/original_file": {
       "get": {
-        "operationId": "projectinfer_image_file_b8e6d8de",
+        "operationId": "projectinfer_image_file_1ddd30b2",
         "summary": "Image File",
         "parameters": [
           {
@@ -2107,7 +2107,7 @@
     },
     "/api/infers/project/images/{image_id}/annotations": {
       "post": {
-        "operationId": "projectinfer_submit_image_annotations_6eb0fc76",
+        "operationId": "projectinfer_submit_image_annotations_788846f2",
         "summary": "Submit Image Annotations",
         "parameters": [
           {
@@ -2155,7 +2155,7 @@
     },
     "/api/infers/project/images/{image_id}/annotations/{annotation_id}": {
       "patch": {
-        "operationId": "projectinfer_modify_image_annotation_9a368906",
+        "operationId": "projectinfer_modify_image_annotation_2d348c19",
         "summary": "Modify Image Annotation",
         "parameters": [
           {
@@ -2212,7 +2212,7 @@
     },
     "/api/projects/{project_id}/inference-providers/": {
       "get": {
-        "operationId": "inferenceprovider_list_providers_e2bb910c",
+        "operationId": "inferenceprovider_list_providers_9edf98b7",
         "summary": "List Providers",
         "parameters": [
           {
@@ -2283,7 +2283,7 @@
         ]
       },
       "post": {
-        "operationId": "inferenceprovider_create_4a746476",
+        "operationId": "inferenceprovider_create_a5df5504",
         "summary": "Create",
         "parameters": [
           {
@@ -2330,7 +2330,7 @@
     },
     "/api/projects/{project_id}/inference-providers/{provider_id}": {
       "get": {
-        "operationId": "inferenceprovider_detail_2b71c23d",
+        "operationId": "inferenceprovider_detail_61750e74",
         "summary": "Detail",
         "parameters": [
           {
@@ -2374,7 +2374,7 @@
         ]
       },
       "patch": {
-        "operationId": "inferenceprovider_update_6651cfa4",
+        "operationId": "inferenceprovider_update_9f88ca6a",
         "summary": "Update",
         "parameters": [
           {
@@ -2428,7 +2428,7 @@
         ]
       },
       "delete": {
-        "operationId": "inferenceprovider_delete_e0e0af3b",
+        "operationId": "inferenceprovider_delete_5876b661",
         "summary": "Delete",
         "parameters": [
           {
@@ -2467,7 +2467,7 @@
     },
     "/api/projects/{project_id}/auto-annotate/": {
       "post": {
-        "operationId": "autoannotate_start_3100241b",
+        "operationId": "autoannotate_start_28b5a76c",
         "summary": "Start",
         "parameters": [
           {
@@ -2514,7 +2514,7 @@
     },
     "/api/projects/{project_id}/auto-annotate/runs": {
       "get": {
-        "operationId": "autoannotate_list_runs_889d5118",
+        "operationId": "autoannotate_list_runs_e188aa86",
         "summary": "List Runs",
         "parameters": [
           {
@@ -2571,7 +2571,7 @@
     },
     "/api/projects/{project_id}/auto-annotate/runs/{run_id}": {
       "get": {
-        "operationId": "autoannotate_run_detail_da32b71e",
+        "operationId": "autoannotate_run_detail_e76e8834",
         "summary": "Run Detail",
         "parameters": [
           {
@@ -2617,7 +2617,7 @@
     },
     "/api/projects/{project_id}/auto-annotate/runs/{run_id}/tasks/{task_id}": {
       "get": {
-        "operationId": "autoannotate_task_detail_3df546b1",
+        "operationId": "autoannotate_task_detail_931830e2",
         "summary": "Task Detail",
         "parameters": [
           {
@@ -2673,7 +2673,7 @@
     },
     "/api/projects/{project_id}/auto-annotate/runs/{run_id}/cancel": {
       "post": {
-        "operationId": "autoannotate_cancel_e917311f",
+        "operationId": "autoannotate_cancel_dd6ee2ef",
         "summary": "Cancel",
         "parameters": [
           {
@@ -2719,7 +2719,7 @@
     },
     "/api/projects/{project_id}/auto-annotate/runs/{run_id}/retry": {
       "post": {
-        "operationId": "autoannotate_retry_ca3cff09",
+        "operationId": "autoannotate_retry_5c73c059",
         "summary": "Retry",
         "parameters": [
           {
@@ -2765,7 +2765,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/auto-annotate/": {
       "post": {
-        "operationId": "imageautoannotate_auto_annotate_image_321f59e8",
+        "operationId": "imageautoannotate_auto_annotate_image_2fca28f6",
         "summary": "Auto Annotate Image",
         "parameters": [
           {
@@ -2821,7 +2821,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/auto-annotate/runs/{run_id}": {
       "get": {
-        "operationId": "imageautoannotate_run_detail_a9aa8455",
+        "operationId": "imageautoannotate_run_detail_3399570d",
         "summary": "Run Detail",
         "parameters": [
           {
@@ -2876,7 +2876,7 @@
     },
     "/api/projects/{project_id}/interactive-providers/": {
       "get": {
-        "operationId": "interactiveprovider_list_providers_9f1df023",
+        "operationId": "interactiveinferenceprovider_list_providers_18d8e75a",
         "summary": "List Providers",
         "parameters": [
           {
@@ -2938,7 +2938,7 @@
           }
         },
         "tags": [
-          "interactive-providers"
+          "infer-interactive"
         ],
         "security": [
           {
@@ -2947,7 +2947,7 @@
         ]
       },
       "post": {
-        "operationId": "interactiveprovider_create_99a824b9",
+        "operationId": "interactiveinferenceprovider_create_e8de1695",
         "summary": "Create",
         "parameters": [
           {
@@ -2973,7 +2973,7 @@
           }
         },
         "tags": [
-          "interactive-providers"
+          "infer-interactive"
         ],
         "requestBody": {
           "content": {
@@ -2994,7 +2994,7 @@
     },
     "/api/projects/{project_id}/interactive-providers/{provider_id}": {
       "get": {
-        "operationId": "interactiveprovider_detail_d1e2215f",
+        "operationId": "interactiveinferenceprovider_detail_a3a4faaf",
         "summary": "Detail",
         "parameters": [
           {
@@ -3029,7 +3029,7 @@
           }
         },
         "tags": [
-          "interactive-providers"
+          "infer-interactive"
         ],
         "security": [
           {
@@ -3038,7 +3038,7 @@
         ]
       },
       "patch": {
-        "operationId": "interactiveprovider_update_8466c0df",
+        "operationId": "interactiveinferenceprovider_update_8d79d83e",
         "summary": "Update",
         "parameters": [
           {
@@ -3073,7 +3073,7 @@
           }
         },
         "tags": [
-          "interactive-providers"
+          "infer-interactive"
         ],
         "requestBody": {
           "content": {
@@ -3092,7 +3092,7 @@
         ]
       },
       "delete": {
-        "operationId": "interactiveprovider_delete_a70216a8",
+        "operationId": "interactiveinferenceprovider_delete_2fd80874",
         "summary": "Delete",
         "parameters": [
           {
@@ -3120,7 +3120,7 @@
           }
         },
         "tags": [
-          "interactive-providers"
+          "infer-interactive"
         ],
         "security": [
           {
@@ -3131,7 +3131,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/interactive-sessions/": {
       "post": {
-        "operationId": "interactivesession_start_b72302a9",
+        "operationId": "interactivesession_start_9aebae9c",
         "summary": "Start",
         "parameters": [
           {
@@ -3159,14 +3159,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InteractiveSessionOutput"
+                  "$ref": "#/components/schemas/InteractiveSessionStartOutput"
                 }
               }
             }
           }
         },
         "tags": [
-          "interactive-sessions"
+          "infer-interactive"
         ],
         "requestBody": {
           "content": {
@@ -3185,74 +3185,9 @@
         ]
       }
     },
-    "/api/projects/{project_id}/images/{image_id}/interactive-sessions/{session_id}/steps": {
-      "post": {
-        "operationId": "interactivesession_add_step_66e29ec1",
-        "summary": "Add Step",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "schema": {
-              "title": "Project Id",
-              "type": "integer"
-            },
-            "required": true
-          },
-          {
-            "in": "path",
-            "name": "image_id",
-            "schema": {
-              "title": "Image Id",
-              "type": "integer"
-            },
-            "required": true
-          },
-          {
-            "in": "path",
-            "name": "session_id",
-            "schema": {
-              "title": "Session Id",
-              "type": "integer"
-            },
-            "required": true
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InteractiveStepOutput"
-                }
-              }
-            }
-          }
-        },
-        "tags": [
-          "interactive-sessions"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InteractiveStepInput"
-              }
-            }
-          },
-          "required": true
-        },
-        "security": [
-          {
-            "JWTAuth": []
-          }
-        ]
-      }
-    },
     "/api/projects/{project_id}/images/{image_id}/interactive-sessions/{session_id}": {
       "get": {
-        "operationId": "interactivesession_detail_fc7fcd5f",
+        "operationId": "interactivesession_detail_7e3d811b",
         "summary": "Detail",
         "parameters": [
           {
@@ -3296,7 +3231,7 @@
           }
         },
         "tags": [
-          "interactive-sessions"
+          "infer-interactive"
         ],
         "security": [
           {
@@ -3307,7 +3242,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/interactive-sessions/{session_id}/commit": {
       "post": {
-        "operationId": "interactivesession_commit_f93bfc9c",
+        "operationId": "interactivesession_commit_375ec8fd",
         "summary": "Commit",
         "parameters": [
           {
@@ -3351,7 +3286,7 @@
           }
         },
         "tags": [
-          "interactive-sessions"
+          "infer-interactive"
         ],
         "requestBody": {
           "content": {
@@ -3372,7 +3307,7 @@
     },
     "/api/projects/{project_id}/images/{image_id}/interactive-sessions/{session_id}/discard": {
       "post": {
-        "operationId": "interactivesession_discard_a679cce6",
+        "operationId": "interactivesession_discard_4ca35f60",
         "summary": "Discard",
         "parameters": [
           {
@@ -3416,7 +3351,7 @@
           }
         },
         "tags": [
-          "interactive-sessions"
+          "infer-interactive"
         ],
         "security": [
           {
@@ -6364,7 +6299,8 @@
         "title": "InteractiveProviderUpdateInput",
         "type": "object"
       },
-      "InteractiveSessionOutput": {
+      "InteractiveSessionStartOutput": {
+        "description": "Session record plus the short-lived credential for the direct calls.\n\nThe frontend presents ``token`` in the ``token_header`` header on its direct\ncalls to the service — ``{predict_url}/{id}/infer_image`` (upload the image\nonce) and ``{predict_url}/{id}/predict`` (per prompt). ``token_expires_at`` is\nthe service-reported ISO-8601 expiry.",
         "properties": {
           "id": {
             "title": "Id",
@@ -6386,27 +6322,133 @@
             "title": "Performed By Id",
             "type": "integer"
           },
-          "from_annotation_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "From Annotation Id"
+          "status": {
+            "title": "Status",
+            "type": "string"
           },
-          "final_annotation_id": {
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          },
+          "token_header": {
+            "title": "Token Header",
+            "type": "string"
+          },
+          "token_expires_at": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Final Annotation Id"
+            "title": "Token Expires At"
+          },
+          "predict_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Predict Url"
+          },
+          "session_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Ref"
+          },
+          "supported_prompt_types": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Supported Prompt Types",
+            "type": "array"
+          },
+          "supported_result_types": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Supported Result Types",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "image_id",
+          "provider_id",
+          "performed_by_id",
+          "status",
+          "error",
+          "created_at",
+          "updated_at",
+          "token",
+          "token_header"
+        ],
+        "title": "InteractiveSessionStartOutput",
+        "type": "object"
+      },
+      "InteractiveSessionStartInput": {
+        "description": "Open an interactive session on an image (image_id comes from the URL).",
+        "properties": {
+          "provider_id": {
+            "title": "Provider Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider_id"
+        ],
+        "title": "InteractiveSessionStartInput",
+        "type": "object"
+      },
+      "InteractiveSessionDetailOutput": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "integer"
+          },
+          "image_id": {
+            "title": "Image Id",
+            "type": "integer"
+          },
+          "provider_id": {
+            "title": "Provider Id",
+            "type": "integer"
+          },
+          "performed_by_id": {
+            "title": "Performed By Id",
+            "type": "integer"
           },
           "status": {
             "title": "Status",
@@ -6421,29 +6463,18 @@
             "title": "Created At",
             "type": "string"
           },
-          "committed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Committed At"
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
           },
-          "discarded_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Discarded At"
+          "steps": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/InteractiveStepOutput"
+            },
+            "title": "Steps",
+            "type": "array"
           }
         },
         "required": [
@@ -6452,40 +6483,12 @@
           "image_id",
           "provider_id",
           "performed_by_id",
-          "from_annotation_id",
-          "final_annotation_id",
           "status",
           "error",
           "created_at",
-          "committed_at",
-          "discarded_at"
+          "updated_at"
         ],
-        "title": "InteractiveSessionOutput",
-        "type": "object"
-      },
-      "InteractiveSessionStartInput": {
-        "description": "Open an interactive session on an image (image_id comes from the URL).",
-        "properties": {
-          "provider_id": {
-            "title": "Provider Id",
-            "type": "integer"
-          },
-          "from_annotation_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "From Annotation Id"
-          }
-        },
-        "required": [
-          "provider_id"
-        ],
-        "title": "InteractiveSessionStartInput",
+        "title": "InteractiveSessionDetailOutput",
         "type": "object"
       },
       "InteractiveStepOutput": {
@@ -6521,6 +6524,17 @@
             "title": "Result Data",
             "type": "object"
           },
+          "annotation_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annotation Id"
+          },
           "error": {
             "title": "Error",
             "type": "string"
@@ -6539,31 +6553,14 @@
           "result",
           "result_type",
           "result_data",
+          "annotation_id",
           "error",
           "created_at"
         ],
         "title": "InteractiveStepOutput",
         "type": "object"
       },
-      "InteractiveStepInput": {
-        "description": "Submit a set of prompts for the next step.\n\nEach prompt is an open dict tagged with ``type`` (box / positive_point /\nnegative_point / mask / text) plus prompt-specific keys.",
-        "properties": {
-          "prompts": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Prompts",
-            "type": "array"
-          }
-        },
-        "required": [
-          "prompts"
-        ],
-        "title": "InteractiveStepInput",
-        "type": "object"
-      },
-      "InteractiveSessionDetailOutput": {
+      "InteractiveSessionOutput": {
         "properties": {
           "id": {
             "title": "Id",
@@ -6585,28 +6582,6 @@
             "title": "Performed By Id",
             "type": "integer"
           },
-          "from_annotation_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "From Annotation Id"
-          },
-          "final_annotation_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Final Annotation Id"
-          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -6620,37 +6595,10 @@
             "title": "Created At",
             "type": "string"
           },
-          "committed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Committed At"
-          },
-          "discarded_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Discarded At"
-          },
-          "steps": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/InteractiveStepOutput"
-            },
-            "title": "Steps",
-            "type": "array"
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
           }
         },
         "required": [
@@ -6659,27 +6607,90 @@
           "image_id",
           "provider_id",
           "performed_by_id",
-          "from_annotation_id",
-          "final_annotation_id",
           "status",
           "error",
           "created_at",
-          "committed_at",
-          "discarded_at"
+          "updated_at"
         ],
-        "title": "InteractiveSessionDetailOutput",
+        "title": "InteractiveSessionOutput",
         "type": "object"
       },
       "InteractiveCommitInput": {
-        "description": "Commit a chosen step's candidate as a real annotation.",
+        "description": "Commit the user's chosen candidate as a real annotation.\n\nIn the direct-call flow the per-prompt loop runs browser -> service, so the\nserver never saw the intermediate steps; the frontend sends the final\nprompts (for audit) plus the chosen geometry here. Exactly one geometry\nfield must match ``annotation_type``.",
         "properties": {
-          "step_id": {
-            "title": "Step Id",
-            "type": "integer"
+          "annotation_type": {
+            "title": "Annotation Type",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "polygon": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Polygon2DDataInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "box": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Box2DDataInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "keypoint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Keypoint2DDataInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompts": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Prompts",
+            "type": "array"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "model_version": {
+            "default": "",
+            "title": "Model Version",
+            "type": "string"
           }
         },
         "required": [
-          "step_id"
+          "annotation_type"
         ],
         "title": "InteractiveCommitInput",
         "type": "object"

@@ -93,7 +93,7 @@ def _call_provider(provider, image_bytes: bytes, file_name: str, meta: Inference
         len(image_bytes),
     )
     resp = httpx.post(
-        provider.inference_url,
+        provider.inference_url.rstrip("/") + "/predict",
         files=files,
         data=data,
         headers=headers,
