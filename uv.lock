@@ -30,7 +30,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anno-sdk", editable = "../anno-sdk" },
+    { name = "anno-sdk", git = "https://github.com/anno-universe/anno-sdk.git" },
     { name = "django", specifier = ">=6.0.6" },
     { name = "django-ninja", specifier = ">=1.6.2" },
     { name = "django-ninja-extra", specifier = ">=0.31.5" },
@@ -54,32 +54,10 @@ dev = [
 [[package]]
 name = "anno-sdk"
 version = "0.4.0"
-source = { editable = "../anno-sdk" }
+source = { git = "https://github.com/anno-universe/anno-sdk.git#0094ed5dae72fc3f273c4c9af3abd2e6f118b988" }
 dependencies = [
     { name = "httpx" },
     { name = "numpy" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.122" },
-    { name = "httpx", specifier = ">=0.28" },
-    { name = "numpy", specifier = ">=2.0.0,<2.3" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
-    { name = "pytest-httpx", marker = "extra == 'dev'", specifier = ">=0.35" },
-    { name = "python-multipart", marker = "extra == 'server'", specifier = ">=0.0.20" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14" },
-    { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.36" },
-]
-provides-extras = ["dev", "server"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "fastapi", specifier = ">=0.138.2" },
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "pytest", specifier = ">=9.1.1" },
-    { name = "pytest-httpx", specifier = ">=0.36.2" },
-    { name = "ruff", specifier = ">=0.15.20" },
 ]
 
 [[package]]
