@@ -117,7 +117,7 @@ class Image2DController:
             logger.exception(
                 "Image upload failed for project %d: %s", project_id, file.name
             )
-            raise HttpError(500, "Image upload failed. The storage service may be unavailable.")
+            raise HttpError(500, "Image upload failed. Check that the storage service is running and the bucket exists.")
         return 201, Image2DOutput.from_image(img)
 
     @http_get(
