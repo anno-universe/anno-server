@@ -28,6 +28,7 @@ from .schemas import (
     Annotation2DCreateInput,
     Annotation2DOutput,
     Image2DOutput,
+    ImageURLOutput,
     OperationOutput,
 )
 
@@ -46,10 +47,12 @@ def _get_s3_client():
     )
 
 
-def _presigned_redirect(key: str, prefix: str) -> HttpResponse:
-    """Build a 307 redirect to the internal proxy path with a pre-signed
-    S3 query string attached.  Caddy proxies the signed request to RustFS
-    which validates the signature and serves the object."""
+def _presigned_url(key: str, prefix: str) -> str:
+    """Return a browser-usable URL for an S3 object: the internal proxy path
+    (``prefix``) with a pre-signed S3 query string attached.  The URL is
+    relative so it routes through Caddy (prod) / the Vite proxy (dev) to
+    RustFS, which validates the signature and serves the object — RustFS is
+    never addressed directly."""
     s3 = _get_s3_client()
     presigned = s3.generate_presigned_url(
         "get_object",
@@ -57,8 +60,15 @@ def _presigned_redirect(key: str, prefix: str) -> HttpResponse:
         ExpiresIn=3600,
     )
     query = urlparse(presigned).query
+    return f"{prefix.rstrip('/')}/{key}?{query}"
+
+
+def _presigned_redirect(key: str, prefix: str) -> HttpResponse:
+    """Build a 307 redirect to the pre-signed internal proxy path.  Used by
+    the machine/SDK image endpoint, whose callers expect raw bytes and follow
+    the redirect."""
     response = HttpResponse(status=307)
-    response["Location"] = f"{prefix.rstrip('/')}/{key}?{query}"
+    response["Location"] = _presigned_url(key, prefix)
     return response
 
 
@@ -180,18 +190,16 @@ class Image2DController:
         "/{image_id}/original_image",
         permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
         auth=JWTAuth(),
+        response={200: ImageURLOutput},
         url_name="image_file",
     )
     def file(self, request, project_id: int, image_id: int):
+        """Mint a pre-signed URL for the original image and hand it to the
+        client, which loads the bytes directly from RustFS-behind-Caddy.
+        Membership is checked here; the signed URL is the capability."""
         img = get_object_or_404(Image2D, id=image_id, project_id=project_id)
-
-        if django_settings.DEBUG:
-            return StreamingHttpResponse(
-                img.image.open(),
-                content_type="image/png",
-            )
-        return _presigned_redirect(
-            img.image.name, django_settings.IMAGE_PROXY_PREFIX
+        return 200, ImageURLOutput(
+            url=_presigned_url(img.image.name, django_settings.IMAGE_PROXY_PREFIX)
         )
 
     @http_get(

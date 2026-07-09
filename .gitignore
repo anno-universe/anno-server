@@ -12,6 +12,9 @@ wheels/
 # Environment secrets
 .env
 
+# Django static files
+staticfiles/
+
 # Docker runtime data (external mount directories)
 docker/postgres/data/
 docker/caddy/caddy_data/
