@@ -23,27 +23,6 @@
         file_server
     }
 
-    # Thumbnail cache served directly from filesystem
-    # Django redirects here after thumbnail generation (cache hit or fresh)
-    handle_path /thumbnail-images/* {
-        root * /tmp/anno-thumbnails
-        file_server
-    }
-
-    # Internal image proxy to S3 (RustFS)
-    # Django redirects here for original image file access.
-    # Caddy strips the /internal-images/ prefix and proxies to RustFS.
-    # NOTE: This bypasses Django authentication. For production, consider
-    # adding Caddy JWT plugin or restricting access at the network level.
-    handle_path /original-images/* {
-        rewrite * /anno-images{uri}
-        reverse_proxy rustfs:9000 {
-            # Forward the Host that boto3 signed (the S3 endpoint netloc) so
-            # RustFS's SigV4 signature check on the pre-signed URL validates.
-            header_up Host rustfs:9000
-        }
-    }
-
     # Everything else reverse-proxied to Django
     handle {
         reverse_proxy django:8000 {

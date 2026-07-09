@@ -56,7 +56,6 @@ INSTALLED_APPS = [
     "whitenoise.runserver_nostatic",
     "django.contrib.staticfiles",
     "ninja_extra",
-    "storages",
     "django_tasks_db",
 ]
 
@@ -157,20 +156,9 @@ NINJA_JWT = {
     "USER_ID_CLAIM": "user_id",
 }
 
-# S3-compatible storage (RustFS)
-AWS_ACCESS_KEY_ID = os.environ["S3_ACCESS_KEY"]
-AWS_SECRET_ACCESS_KEY = os.environ["S3_SECRET_KEY"]
-AWS_STORAGE_BUCKET_NAME = "anno-images"
-AWS_S3_ENDPOINT_URL = os.environ.get("AWS_S3_ENDPOINT_URL", "http://localhost:9000")
-AWS_S3_REGION_NAME = "us-east-1"
-AWS_S3_SIGNATURE_VERSION = "s3v4"
-AWS_QUERYSTRING_AUTH = False
-
-# Internal prefix for original image serving
-IMAGE_PROXY_PREFIX = "/original-images/"
-
-# Internal prefix for cached thumbnails
-THUMB_CACHE_PREFIX = "/thumbnail-images/"
+# Media files (user-uploaded images)
+MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_URL = "/media/"
 
 CACHES = {
     "default": {
@@ -207,7 +195,7 @@ TASKS = {
 
 STORAGES = {
     "default": {
-        "BACKEND": "storages.backends.s3.S3Storage",
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
     },
     "staticfiles": {
         "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",

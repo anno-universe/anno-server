@@ -1,14 +1,10 @@
 import logging
 from io import BytesIO
-from urllib.parse import urlparse
 
-import boto3
-from botocore.client import Config
-from django.conf import settings as django_settings
 from django.core.cache import caches
 from django.db import transaction
 from django.db.models import Count, Q
-from django.http import HttpResponse, StreamingHttpResponse
+from django.http import FileResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from ninja import File
 from ninja.files import UploadedFile
@@ -28,48 +24,10 @@ from .schemas import (
     Annotation2DCreateInput,
     Annotation2DOutput,
     Image2DOutput,
-    ImageURLOutput,
     OperationOutput,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _get_s3_client():
-    """Return a boto3 S3 client configured for RustFS."""
-    return boto3.client(
-        "s3",
-        endpoint_url=django_settings.AWS_S3_ENDPOINT_URL,
-        aws_access_key_id=django_settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=django_settings.AWS_SECRET_ACCESS_KEY,
-        config=Config(signature_version="s3v4"),
-        region_name=django_settings.AWS_S3_REGION_NAME,
-    )
-
-
-def _presigned_url(key: str, prefix: str) -> str:
-    """Return a browser-usable URL for an S3 object: the internal proxy path
-    (``prefix``) with a pre-signed S3 query string attached.  The URL is
-    relative so it routes through Caddy (prod) / the Vite proxy (dev) to
-    RustFS, which validates the signature and serves the object — RustFS is
-    never addressed directly."""
-    s3 = _get_s3_client()
-    presigned = s3.generate_presigned_url(
-        "get_object",
-        Params={"Bucket": django_settings.AWS_STORAGE_BUCKET_NAME, "Key": key},
-        ExpiresIn=3600,
-    )
-    query = urlparse(presigned).query
-    return f"{prefix.rstrip('/')}/{key}?{query}"
-
-
-def _presigned_redirect(key: str, prefix: str) -> HttpResponse:
-    """Build a 307 redirect to the pre-signed internal proxy path.  Used by
-    the machine/SDK image endpoint, whose callers expect raw bytes and follow
-    the redirect."""
-    response = HttpResponse(status=307)
-    response["Location"] = _presigned_url(key, prefix)
-    return response
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +75,7 @@ class Image2DController:
             logger.exception(
                 "Image upload failed for project %d: %s", project_id, file.name
             )
-            raise HttpError(500, "Image upload failed. Check that the storage service is running and the bucket exists.")
+            raise HttpError(500, "Image upload failed.")
         return 201, Image2DOutput.from_image(img)
 
     @http_get(
@@ -190,17 +148,11 @@ class Image2DController:
         "/{image_id}/original_image",
         permissions=[IsAuthenticated, IsProjectMemberOrAdmin],
         auth=JWTAuth(),
-        response={200: ImageURLOutput},
         url_name="image_file",
     )
     def file(self, request, project_id: int, image_id: int):
-        """Mint a pre-signed URL for the original image and hand it to the
-        client, which loads the bytes directly from RustFS-behind-Caddy.
-        Membership is checked here; the signed URL is the capability."""
         img = get_object_or_404(Image2D, id=image_id, project_id=project_id)
-        return 200, ImageURLOutput(
-            url=_presigned_url(img.image.name, django_settings.IMAGE_PROXY_PREFIX)
-        )
+        return FileResponse(open(img.image.path, "rb"), content_type="image/png")
 
     @http_get(
         "/{image_id}/thumbnail_image",
@@ -224,18 +176,10 @@ class Image2DController:
 
         cached = thumb_cache.get(cache_key)
         if cached is not None:
-            if django_settings.DEBUG:
-                return StreamingHttpResponse(
-                    BytesIO(cached), content_type="image/jpeg"
-                )
-            response = HttpResponse(status=307)
-            path = thumb_cache.filepath(cache_key)
-            response["Location"] = (
-                f"{django_settings.THUMB_CACHE_PREFIX.rstrip('/')}/{path.name}"
+            return StreamingHttpResponse(
+                BytesIO(cached), content_type="image/jpeg"
             )
-            return response
 
-        # Cache miss — resize and store
         img = get_object_or_404(Image2D, id=image_id, project_id=project_id)
         img.image.open()
         pil_img = PILImage.open(img.image)
@@ -246,15 +190,7 @@ class Image2DController:
         data = buf.getvalue()
 
         thumb_cache.set(cache_key, data)
-
-        if django_settings.DEBUG:
-            return StreamingHttpResponse(BytesIO(data), content_type="image/jpeg")
-        response = HttpResponse(status=307)
-        path = thumb_cache.filepath(cache_key)
-        response["Location"] = (
-            f"{django_settings.THUMB_CACHE_PREFIX.rstrip('/')}/{path.name}"
-        )
-        return response
+        return StreamingHttpResponse(BytesIO(data), content_type="image/jpeg")
 
 
 # ---------------------------------------------------------------------------

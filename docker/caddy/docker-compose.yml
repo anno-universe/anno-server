@@ -13,7 +13,6 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./caddy_data:/data
       - ../../staticfiles:/srv/static:ro
-      - /tmp/anno-thumbnails:/tmp/anno-thumbnails:ro
     networks:
       - anno-universe
 
