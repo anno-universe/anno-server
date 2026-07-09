@@ -4,7 +4,7 @@ from datetime import timedelta
 from django.conf import settings as django_settings
 from django.db import transaction
 from django.db.models import Q
-from django.http import StreamingHttpResponse
+from django.http import FileResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
@@ -15,7 +15,6 @@ from ninja_extra.permissions import AllowAny, IsAuthenticated
 from ninja_jwt.authentication import JWTAuth
 
 from anno.pagination import PaginatedResponse, paginate_queryset
-from anno_images.controllers import _presigned_redirect
 from anno_images.models import Annotation2D, Image2D, Operation
 from anno_projects.models import Project, ProjectMembership
 from anno_projects.permissions import IsProjectMemberOrAdmin, IsProjectSupervisorOrAdmin
@@ -135,9 +134,7 @@ class ProjectInferController:
     )
     def image_file(self, request, image_id: int):
         img = get_object_or_404(Image2D, id=image_id, project=request.project)
-        if django_settings.DEBUG:
-            return StreamingHttpResponse(img.image.open(), content_type="image/png")
-        return _presigned_redirect(img.image.name, django_settings.IMAGE_PROXY_PREFIX)
+        return FileResponse(open(img.image.path, "rb"), content_type="image/png")
 
     # -- annotations ---------------------------------------------------------
 

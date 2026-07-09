@@ -1,6 +1,3 @@
-import boto3
-from botocore.client import Config
-from django.conf import settings
 from django.db.models.signals import post_delete, pre_save
 from django.dispatch import receiver
 
@@ -22,23 +19,6 @@ def enforce_denormalized_project(sender, instance, **kwargs):
 
 
 @receiver(post_delete, sender=Project)
-def cleanup_project_s3_files(sender, instance, **kwargs):
-    s3 = boto3.client(
-        "s3",
-        endpoint_url=settings.AWS_S3_ENDPOINT_URL,
-        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-        config=Config(signature_version="s3v4"),
-        region_name=settings.AWS_S3_REGION_NAME,
-    )
-    prefix = f"images/{instance.pk}/"
-    paginator = s3.get_paginator("list_objects_v2")
-    for page in paginator.paginate(
-        Bucket=settings.AWS_STORAGE_BUCKET_NAME, Prefix=prefix
-    ):
-        objects = page.get("Contents", [])
-        if objects:
-            s3.delete_objects(
-                Bucket=settings.AWS_STORAGE_BUCKET_NAME,
-                Delete={"Objects": [{"Key": obj["Key"]} for obj in objects]},
-            )
+def cleanup_project_files(sender, instance, **kwargs):
+    for image in instance.images.all():
+        image.image.delete(save=False)
