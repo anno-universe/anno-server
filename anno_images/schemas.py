@@ -41,6 +41,12 @@ class Image2DOutput(Schema):
         )
 
 
+class ImageURLOutput(Schema):
+    """A short-lived, pre-signed URL the browser loads the image directly from."""
+
+    url: str
+
+
 # ---------- Annotation2D Subtype Inputs ----------
 
 

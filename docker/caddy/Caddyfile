@@ -37,7 +37,11 @@
     # adding Caddy JWT plugin or restricting access at the network level.
     handle_path /original-images/* {
         rewrite * /anno-images{uri}
-        reverse_proxy rustfs:9000
+        reverse_proxy rustfs:9000 {
+            # Forward the Host that boto3 signed (the S3 endpoint netloc) so
+            # RustFS's SigV4 signature check on the pre-signed URL validates.
+            header_up Host rustfs:9000
+        }
     }
 
     # Everything else reverse-proxied to Django
