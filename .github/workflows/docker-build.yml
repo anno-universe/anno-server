@@ -1,5 +1,9 @@
 name: Docker Build
 
+permissions:
+  contents: read
+  packages: write
+
 on:
   workflow_dispatch:
     inputs:
