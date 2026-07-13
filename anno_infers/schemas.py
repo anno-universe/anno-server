@@ -408,6 +408,7 @@ def _validate_prompt_types(value: list[str]) -> list[str]:
 class InteractiveProviderCreateInput(Schema):
     name: str
     inference_url: str = Field(description="The service's base URL (e.g., https://infer.example.com). /session will be appended by the platform.")
+    public_url: str = Field(default="", description="Browser-reachable base URL for the frontend's direct predict calls, e.g. '/_interactive_infer' or 'https://host/_interactive_infer'. Blank => the platform falls back to the service handshake, then inference_url.")
     supported_prompt_types: list[str]
     supported_result_types: list[str]
     model_name: str = ""
@@ -441,6 +442,7 @@ class InteractiveProviderUpdateInput(Schema):
 
     name: str | None = None
     inference_url: str | None = Field(default=None, description="The service's base URL (e.g., https://infer.example.com). /session will be appended by the platform.")
+    public_url: str | None = Field(default=None, description="Browser-reachable base URL for the frontend's direct predict calls, e.g. '/_interactive_infer' or 'https://host/_interactive_infer'.")
     supported_prompt_types: list[str] | None = None
     supported_result_types: list[str] | None = None
     model_name: str | None = None
@@ -477,6 +479,7 @@ class InteractiveProviderOutput(Schema):
     model_name: str
     description: str
     inference_url: str = Field(description="The service's base URL (e.g., https://infer.example.com). /session will be appended by the platform.")
+    public_url: str = Field(description="Browser-reachable base URL for the frontend's direct predict calls, e.g. '/_interactive_infer' or 'https://host/_interactive_infer'. Empty when unset.")
     supported_prompt_types: list[str]
     supported_result_types: list[str]
     auth_type: str
@@ -496,6 +499,7 @@ class InteractiveProviderOutput(Schema):
             model_name=p.model_name,
             description=p.description,
             inference_url=p.inference_url,
+            public_url=p.public_url,
             supported_prompt_types=p.supported_prompt_types,
             supported_result_types=p.supported_result_types,
             auth_type=p.auth_type,

@@ -85,6 +85,43 @@ services:
     depends_on:
       - anno-server
 
+  # Interactive inference provider (SAM/SAM2 style). Only `expose`d on the
+  # internal network — the browser reaches it through Caddy's /_interactive_infer
+  # route (see Caddyfile.example), never directly. In the platform's interactive
+  # provider record set:
+  #   inference_url = http://anno-sam:8422        (server -> service, docker DNS)
+  #   public_url    = /_interactive_infer         (browser -> service, via Caddy)
+  anno-sam:
+    image: ghcr.io/anno-universe/sam-interactive-server:latest
+    container_name: anno-sam
+    restart: unless-stopped
+    expose:
+      - "8422"
+    environment:
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: "8422"
+      SAM_MODEL_ID: ${SAM_MODEL_ID:-facebook/sam-vit-base}
+      PROVIDER_API_KEY: ${PROVIDER_API_KEY:-changeme}
+      AUTH_HEADER: ${AUTH_HEADER:-X-API-Key}
+      # public_url is owned by the platform (provider.public_url) and served via
+      # Caddy /infer, so leave PUBLIC_URL / CORS_ORIGIN empty (same-origin).
+      PUBLIC_URL: ""
+      CORS_ORIGIN: ""
+      TOKEN_HEADER: ${TOKEN_HEADER:-X-Session-Token}
+      TOKEN_TTL_SECONDS: ${INTERACTIVE_SESSION_TOKEN_TTL_SECONDS:-1800}
+    volumes:
+      - ${HF_CACHE_DIR:-./hf-cache}:/app/.cache/huggingface
+    networks:
+      - anno-network
+    # GPU is optional; drop the deploy block for CPU-only inference.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
 networks:
   anno-network:
     driver: bridge

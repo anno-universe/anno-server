@@ -50,6 +50,23 @@
         }
     }
 
+    # ---- Interactive inference service: browser -> provider (e.g. anno-sam) ----
+    # The interactive session's per-prompt loop runs browser -> service directly.
+    # The service is only on the internal network (expose, not published), so the
+    # browser must reach it through Caddy. The /_interactive_infer prefix is chosen
+    # to be collision-safe with the SPA router (leading underscore, matches no app
+    # route). handle_path strips it, so the browser's /_interactive_infer/{session}/predict
+    # arrives at the service as /{session}/predict. Set the interactive provider's
+    # public_url to "/_interactive_infer" so the platform returns it as predict_url.
+    # Same-origin => no CORS. Adjust the upstream to your service name.
+    handle_path /_interactive_infer/* {
+        reverse_proxy anno-sam:8422 {
+            header_up Host {http.request.host}
+            header_up X-Forwarded-For {http.request.remote.host}
+            header_up X-Forwarded-Proto {http.request.scheme}
+        }
+    }
+
     # ---- Frontend: SPA fallback, only for paths not handled above ----
     handle {
         root * /srv/anno-web

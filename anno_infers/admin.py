@@ -93,7 +93,7 @@ class InteractiveInferenceServiceProviderAdmin(admin.ModelAdmin):
         "created_at",
     )
     list_filter = ("is_active", "auth_type", "project")
-    search_fields = ("name", "model_name", "inference_url")
+    search_fields = ("name", "model_name", "inference_url", "public_url")
     raw_id_fields = ("project", "created_by")
     actions = []
 
