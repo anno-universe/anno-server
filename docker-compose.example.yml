@@ -11,15 +11,13 @@ services:
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-*}
       DATABASE_HOST: postgres
       TZ: ${TZ:-Asia/Shanghai}
-      INFERS_BASE_URL: ${INFERS_BASE_URL:-http://localhost}
       INTERACTIVE_SESSION_TOKEN_TTL_SECONDS: ${INTERACTIVE_SESSION_TOKEN_TTL_SECONDS:-1800}
       PYTHONUNBUFFERED: "1"
       PYTHONDONTWRITEBYTECODE: "1"
       DJANGO_SETTINGS_MODULE: anno.settings
     volumes:
       - media_data:/app/media
-      - static_data:/app/staticfiles
-      - thumbnails_data:/tmp/anno-thumbnails
+      - /tmp/anno-thumbnails:/tmp/anno-thumbnails
     networks:
       - anno-network
     depends_on:
@@ -37,7 +35,6 @@ services:
       ALLOWED_HOSTS: ""
       DATABASE_HOST: postgres
       TZ: ${TZ:-Asia/Shanghai}
-      INFERS_BASE_URL: ${INFERS_BASE_URL:-http://localhost}
       PYTHONUNBUFFERED: "1"
       PYTHONDONTWRITEBYTECODE: "1"
       DJANGO_SETTINGS_MODULE: anno.settings
@@ -82,7 +79,6 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
-      - static_data:/srv/static:ro
     networks:
       - anno-network
     depends_on:
@@ -95,6 +91,4 @@ networks:
 volumes:
   postgres_data:
   media_data:
-  static_data:
-  thumbnails_data:
   caddy_data:

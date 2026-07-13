@@ -27,9 +27,6 @@ SECRET_KEY=your-random-secret-key
 # 必填：替换为你的域名
 ALLOWED_HOSTS=your-domain.com
 
-# 必填：外部模型服务通过此地址回传结果
-INFERS_BASE_URL=https://your-domain.com
-
 # 可选：时区
 TZ=Asia/Shanghai
 ```
@@ -57,7 +54,6 @@ curl http://localhost/health/
 |------|------|--------|------|
 | `SECRET_KEY` | **是** | — | Django 密钥，同时用作 JWT 签名密钥 |
 | `ALLOWED_HOSTS` | **是** | `*` | 允许访问的域名，多个用逗号分隔 |
-| `INFERS_BASE_URL` | 推荐 | `http://localhost` | 自动标注时发送给模型服务的回调地址 |
 | `DEBUG` | 否 | `false` | 生产环境务必设为 `false` |
 | `TZ` | 否 | `Asia/Shanghai` | 时区 |
 | `INTERACTIVE_SESSION_TOKEN_TTL_SECONDS` | 否 | `1800` | 交互式标注会话令牌有效期（秒） |
@@ -87,7 +83,7 @@ your-domain.com {
 | **django** | `ghcr.io/anno-universe/anno-server:latest` | Gunicorn Web 服务（4 worker，端口 8000，内部） |
 | **db_worker** | `ghcr.io/anno-universe/anno-server:latest` | 后台任务轮询（自动标注等异步任务） |
 | **postgres** | `postgres:16-alpine` | PostgreSQL 数据库（端口 5432，内部） |
-| **caddy** | `caddy:2-alpine` | 反向代理（端口 80/443），处理 HTTPS 和静态文件 |
+| **caddy** | `caddy:2-alpine` | 反向代理（端口 80/443），处理 HTTPS |
 
 ### 数据持久化
 
@@ -95,8 +91,7 @@ your-domain.com {
 |----|------|----------|
 | `postgres_data` | 数据库数据 | **必须备份**（pg_dump 或卷快照） |
 | `media_data` | 用户上传的图片（核心数据） | **必须备份** |
-| `static_data` | 静态文件（可重建） | 无需备份（`collectstatic` 可重生成） |
-| `thumbnails_data` | 缩略图缓存（1 小时过期） | 无需备份 |
+| `/tmp/anno-thumbnails` | 缩略图缓存（挂载宿主机 `/tmp`） | 无需备份 |
 | `caddy_data` | TLS 证书 | 建议备份（避免频繁申请证书） |
 
 ## 运维

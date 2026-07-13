@@ -1,6 +1,5 @@
 from datetime import datetime
 
-from django.conf import settings
 from ninja import Field, Schema
 from pydantic import field_validator
 
@@ -40,17 +39,14 @@ class ProjectImageOutput(Schema):
     file_name: str
     width: int | None
     height: int | None
-    file_url: str
 
     @staticmethod
     def from_image(img) -> "ProjectImageOutput":
-        base = settings.INFERS_BASE_URL.rstrip("/")
         return ProjectImageOutput(
             id=img.id,
             file_name=img.file_name,
             width=img.width,
             height=img.height,
-            file_url=f"{base}/api/infers/project/images/{img.id}/original_file",
         )
 
 

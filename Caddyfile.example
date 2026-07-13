@@ -8,11 +8,6 @@
     }
     respond @health "OK" 200
 
-    handle_path /static/* {
-        root * /srv/static
-        file_server
-    }
-
     handle {
         reverse_proxy django:8000 {
             header_up Host {http.request.host}

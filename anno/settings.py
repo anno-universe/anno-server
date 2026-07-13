@@ -172,10 +172,6 @@ CACHES = {
     },
 }
 
-# Base URL used to construct callback URLs sent to external model services.
-# The model service must be able to reach this URL to post results back.
-INFERS_BASE_URL = os.environ.get("INFERS_BASE_URL", "http://localhost:8000")
-
 # TTL hint sent to an interactive inference service when opening a session. The
 # service mints the short-lived browser token and is free to honour or override
 # this; the handshake response's expiry is authoritative.
