@@ -1,9 +1,9 @@
 version: "3.9"
 
 services:
-  django:
+  anno-server:
     image: ghcr.io/anno-universe/anno-server:latest
-    container_name: anno-django
+    container_name: anno-server
     restart: unless-stopped
     environment:
       SECRET_KEY: ${SECRET_KEY:?err}
@@ -24,9 +24,9 @@ services:
       postgres:
         condition: service_healthy
 
-  db_worker:
+  anno-worker:
     image: ghcr.io/anno-universe/anno-server:latest
-    container_name: anno-db-worker
+    container_name: anno-worker
     restart: unless-stopped
     command: python manage.py db_worker
     environment:
@@ -78,11 +78,12 @@ services:
       - "443:443/udp"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../anno-web/dist:/srv/anno-web:ro
       - caddy_data:/data
     networks:
       - anno-network
     depends_on:
-      - django
+      - anno-server
 
 networks:
   anno-network:
