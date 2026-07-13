@@ -835,7 +835,11 @@ class InteractiveSessionController:
             token=handshake.token,
             token_header=INTERACTIVE_TOKEN_HEADER,
             token_expires_at=handshake.expires_at,
-            predict_url=handshake.predict_url or provider.inference_url.rstrip("/"),
+            predict_url=(
+                provider.public_url.rstrip("/")
+                or handshake.predict_url
+                or provider.inference_url.rstrip("/")
+            ),
             session_ref=handshake.session_ref,
             supported_prompt_types=list(provider.supported_prompt_types),
             supported_result_types=list(provider.supported_result_types),

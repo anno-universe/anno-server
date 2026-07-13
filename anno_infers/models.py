@@ -331,6 +331,18 @@ class InteractiveInferenceServiceProvider(models.Model):
     model_name = models.CharField(max_length=255, blank=True, default="")
     description = models.TextField(blank=True, default="")
     inference_url = models.URLField(max_length=1024, help_text="The service's base URL (e.g., https://infer.example.com). The platform appends standard SDK paths (/predict, /session, etc.) automatically.")
+    public_url = models.CharField(
+        max_length=1024,
+        blank=True,
+        default="",
+        help_text=(
+            "Browser-reachable base URL for the frontend's direct predict calls, e.g. "
+            "'/_interactive_infer' (a same-origin path the reverse proxy forwards to the "
+            "service) or 'https://host/_interactive_infer'. Distinct from inference_url, "
+            "which is the server-side address used for the handshake. Blank => fall back "
+            "to the service handshake, then inference_url."
+        ),
+    )
 
     supported_prompt_types = models.JSONField(
         default=list,

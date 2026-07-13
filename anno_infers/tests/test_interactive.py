@@ -249,6 +249,17 @@ class InteractiveSessionTests(InteractiveBaseTest):
         self.assertEqual(kwargs["json"]["image_id"], self.image.id)
         self.assertEqual(kwargs["json"]["session_id"], body["id"])
 
+    def test_start_session_public_url_overrides_handshake(self):
+        # When the provider has a public_url, it wins over the service's
+        # handshake predict_url (which itself wins over inference_url).
+        prov = self._make_provider(
+            project=self.project, public_url="/_interactive_infer/"
+        )
+        res = self._start_session(prov)
+        self.assertEqual(res.status_code, 201, res.content)
+        # Trailing slash is stripped so the browser builds /_interactive_infer/{id}/predict.
+        self.assertEqual(res.json()["predict_url"], "/_interactive_infer")
+
     def test_start_inactive_provider_404(self):
         prov = self._make_provider(project=self.project, is_active=False)
         res = self._start_session(prov)
