@@ -38,21 +38,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --shell /bin/bash app
 
+USER app
+
 WORKDIR /app
 
-COPY --from=builder --chown=app:app /app/.venv /app/.venv
+COPY --from=builder /app/.venv /app/.venv
 
-COPY --chown=app:app . .
+COPY . .
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     DJANGO_SETTINGS_MODULE=anno.settings
 
-COPY --chown=app:app docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+COPY --chmod=+x docker-entrypoint.sh /docker-entrypoint.sh
 
-USER app
+RUN mkdir -p /app/staticfiles
 
 EXPOSE 8000
 
