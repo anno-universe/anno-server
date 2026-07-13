@@ -6,6 +6,7 @@ services:
     container_name: anno-server
     restart: unless-stopped
     environment:
+      RUN_MODE: server
       SECRET_KEY: ${SECRET_KEY:?err}
       DEBUG: "false"
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-*}
@@ -30,6 +31,7 @@ services:
     restart: unless-stopped
     command: python manage.py db_worker
     environment:
+      RUN_MODE: worker
       SECRET_KEY: ${SECRET_KEY:?err}
       DEBUG: "false"
       ALLOWED_HOSTS: ""
