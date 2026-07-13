@@ -63,7 +63,7 @@ class InferenceServiceProvider(models.Model):
     name = models.CharField(max_length=255, help_text="Human label, e.g. 'SAM-2 box->mask'.")
     model_name = models.CharField(max_length=255, blank=True, default="")
     description = models.TextField(blank=True, default="")
-    inference_url = models.URLField(max_length=1024, help_text="The service's base URL (e.g., https://infer.example.com). The platform appends standard SDK paths (/predict, /session, etc.) automatically.")
+    inference_url = models.CharField(max_length=1024, help_text="The service's base URL (e.g., https://infer.example.com or http://anno-sam:8422 for an internal Docker service). The platform appends standard SDK paths (/predict, /session, etc.) automatically.")
 
     supported_result_types = models.JSONField(
         default=list,
@@ -330,7 +330,7 @@ class InteractiveInferenceServiceProvider(models.Model):
     name = models.CharField(max_length=255, help_text="Human label, e.g. 'SAM-2 interactive'.")
     model_name = models.CharField(max_length=255, blank=True, default="")
     description = models.TextField(blank=True, default="")
-    inference_url = models.URLField(max_length=1024, help_text="The service's base URL (e.g., https://infer.example.com). The platform appends standard SDK paths (/predict, /session, etc.) automatically.")
+    inference_url = models.CharField(max_length=1024, help_text="The service's base URL (e.g., https://infer.example.com or http://anno-sam:8422 for an internal Docker service). The platform appends standard SDK paths (/predict, /session, etc.) automatically.")
     public_url = models.CharField(
         max_length=1024,
         blank=True,
