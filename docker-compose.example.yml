@@ -78,7 +78,7 @@ services:
       - "443:443/udp"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ../anno-web/dist:/srv/anno-web:ro
+      - {web-dist}:/srv/anno-web:ro
       - caddy_data:/data
     networks:
       - anno-network
