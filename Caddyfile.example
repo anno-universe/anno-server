@@ -1,0 +1,30 @@
+{
+    grace_period 10s
+}
+
+:80 {
+    @health {
+        path /health/
+    }
+    respond @health "OK" 200
+
+    handle_path /static/* {
+        root * /srv/static
+        file_server
+    }
+
+    handle {
+        reverse_proxy django:8000 {
+            header_up Host {http.request.host}
+            header_up X-Forwarded-For {http.request.remote.host}
+            header_up X-Forwarded-Proto {http.request.scheme}
+            header_up X-Forwarded-Host {http.request.host}
+            header_up X-Forwarded-Port {http.request.port}
+        }
+    }
+
+    log {
+        output stdout
+        format json
+    }
+}

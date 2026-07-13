@@ -1,0 +1,100 @@
+version: "3.9"
+
+services:
+  django:
+    image: ghcr.io/anno-universe/anno-server:latest
+    container_name: anno-django
+    restart: unless-stopped
+    environment:
+      SECRET_KEY: ${SECRET_KEY:?err}
+      DEBUG: "false"
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-*}
+      DATABASE_HOST: postgres
+      TZ: ${TZ:-Asia/Shanghai}
+      INFERS_BASE_URL: ${INFERS_BASE_URL:-http://localhost}
+      INTERACTIVE_SESSION_TOKEN_TTL_SECONDS: ${INTERACTIVE_SESSION_TOKEN_TTL_SECONDS:-1800}
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      DJANGO_SETTINGS_MODULE: anno.settings
+    volumes:
+      - media_data:/app/media
+      - static_data:/app/staticfiles
+      - thumbnails_data:/tmp/anno-thumbnails
+    networks:
+      - anno-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  db_worker:
+    image: ghcr.io/anno-universe/anno-server:latest
+    container_name: anno-db-worker
+    restart: unless-stopped
+    command: python manage.py db_worker
+    environment:
+      SECRET_KEY: ${SECRET_KEY:?err}
+      DEBUG: "false"
+      ALLOWED_HOSTS: ""
+      DATABASE_HOST: postgres
+      TZ: ${TZ:-Asia/Shanghai}
+      INFERS_BASE_URL: ${INFERS_BASE_URL:-http://localhost}
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      DJANGO_SETTINGS_MODULE: anno.settings
+    volumes:
+      - media_data:/app/media
+    networks:
+      - anno-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: anno-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: anno
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - anno-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d anno"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: anno-caddy
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - static_data:/srv/static:ro
+    networks:
+      - anno-network
+    depends_on:
+      - django
+
+networks:
+  anno-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  media_data:
+  static_data:
+  thumbnails_data:
+  caddy_data:
