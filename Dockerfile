@@ -35,10 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libharfbuzz0b \
     libfribidi0 \
     libxcb1 \
-    && rm -rf /var/lib/apt/lists/* \
-    && useradd --create-home --shell /bin/bash app
-
-USER app
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -52,8 +49,6 @@ ENV PATH="/app/.venv/bin:$PATH" \
     DJANGO_SETTINGS_MODULE=anno.settings
 
 COPY --chmod=+x docker-entrypoint.sh /docker-entrypoint.sh
-
-RUN mkdir -p /app/staticfiles
 
 EXPOSE 8000
 
