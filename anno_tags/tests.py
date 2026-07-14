@@ -249,3 +249,87 @@ class ImageTagRemovalTests(TestCase):
         )
         res = self.client.delete(url, headers=_jwt_headers(self.worker_a))
         self.assertEqual(res.status_code, 404)
+
+
+class TagSoftDeleteTests(TestCase):
+    """Soft-delete of ProjectTag / ImageTag and partial-unique reuse."""
+
+    def setUp(self):
+        self.client = Client()
+        self.supervisor = User.objects.create_user(username="sup", password="x")
+        self.project = Project.objects.create(
+            name="P", created_by=self.supervisor
+        )  # creator auto-added as supervisor
+        self.image = Image2D.objects.create(
+            project=self.project,
+            image=SimpleUploadedFile("t.png", _ONE_PX_PNG, content_type="image/png"),
+            file_name="t.png",
+        )
+        self.tag = ProjectTag.objects.create(
+            project=self.project,
+            name="worker_finish",
+            display_name="Worker Finish",
+            created_by=self.supervisor,
+        )
+
+    def _tags_url(self):
+        return f"/api/projects/{self.project.id}/tags/"
+
+    def _image_tags_url(self):
+        return f"/api/projects/{self.project.id}/images/{self.image.id}/tags/"
+
+    def test_delete_tag_soft_deletes_and_cascades_image_tags(self):
+        it = ImageTag.objects.create(
+            image=self.image, tag=self.tag, applied_by=self.supervisor
+        )
+        res = self.client.delete(
+            f"{self._tags_url()}{self.tag.id}", headers=_jwt_headers(self.supervisor)
+        )
+        self.assertEqual(res.status_code, 204)
+
+        # Tag: hidden from the API, preserved in all_objects.
+        self.assertFalse(ProjectTag.objects.filter(pk=self.tag.pk).exists())
+        self.assertTrue(ProjectTag.all_objects.filter(pk=self.tag.pk).exists())
+        detail = self.client.get(
+            f"{self._tags_url()}{self.tag.id}", headers=_jwt_headers(self.supervisor)
+        )
+        self.assertEqual(detail.status_code, 404)
+
+        # Its application was soft-cascaded, so it no longer lists on the image.
+        self.assertFalse(ImageTag.objects.filter(pk=it.pk).exists())
+        list_res = self.client.get(
+            self._image_tags_url(), headers=_jwt_headers(self.supervisor)
+        )
+        self.assertEqual(list_res.json(), [])
+
+    def test_recreate_tag_with_same_name_after_soft_delete(self):
+        self.tag.delete()  # soft
+        body = {"name": "worker_finish", "display_name": "Again"}
+        res = self.client.post(
+            self._tags_url(),
+            data=json.dumps(body),
+            content_type="application/json",
+            headers=_jwt_headers(self.supervisor),
+        )
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(
+            ProjectTag.objects.filter(project=self.project, name="worker_finish").count(),
+            1,
+        )
+
+    def test_reapply_image_tag_after_removal(self):
+        it = ImageTag.objects.create(
+            image=self.image, tag=self.tag, applied_by=self.supervisor
+        )
+        it.delete()  # soft
+        body = {"tag_id": self.tag.id}
+        res = self.client.post(
+            self._image_tags_url(),
+            data=json.dumps(body),
+            content_type="application/json",
+            headers=_jwt_headers(self.supervisor),
+        )
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(
+            ImageTag.objects.filter(image=self.image, tag=self.tag).count(), 1
+        )
