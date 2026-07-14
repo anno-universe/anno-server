@@ -1,5 +1,7 @@
 from django.contrib import admin, messages
 
+from anno.admin import SoftDeleteAdminMixin
+
 from .models import (
     InferenceResult,
     InferenceRun,
@@ -13,7 +15,7 @@ from .services import complete_interactive_session
 
 
 @admin.register(InferenceServiceProvider)
-class InferenceServiceProviderAdmin(admin.ModelAdmin):
+class InferenceServiceProviderAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     # auth_secret is deliberately excluded from list_display; it is the
     # plaintext outbound credential and must not be surfaced casually.
     list_display = (
@@ -23,6 +25,7 @@ class InferenceServiceProviderAdmin(admin.ModelAdmin):
         "project",
         "auth_type",
         "is_active",
+        "deleted_at",
         "created_at",
     )
     list_filter = ("is_active", "auth_type", "project")
@@ -81,7 +84,7 @@ class InferenceResultAdmin(admin.ModelAdmin):
 
 
 @admin.register(InteractiveInferenceServiceProvider)
-class InteractiveInferenceServiceProviderAdmin(admin.ModelAdmin):
+class InteractiveInferenceServiceProviderAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     # auth_secret is deliberately excluded from list_display.
     list_display = (
         "id",
@@ -90,12 +93,12 @@ class InteractiveInferenceServiceProviderAdmin(admin.ModelAdmin):
         "project",
         "auth_type",
         "is_active",
+        "deleted_at",
         "created_at",
     )
     list_filter = ("is_active", "auth_type", "project")
     search_fields = ("name", "model_name", "inference_url", "public_url")
     raw_id_fields = ("project", "created_by")
-    actions = []
 
 
 class InteractiveInferenceOperationInline(admin.TabularInline):
