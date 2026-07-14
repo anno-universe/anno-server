@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 from ninja_extra import api_controller, http_delete, http_get, http_patch, http_post
 from ninja_extra.exceptions import HttpError
@@ -71,7 +72,12 @@ class ProjectController:
                 count=count, limit=limit, offset=offset,
                 items=[ProjectOutput.from_project(p, "admin") for p in rows],
             )
-        qs = ProjectMembership.objects.filter(user=user).select_related("project")
+        qs = (
+            ProjectMembership.objects.filter(
+                user=user, project__deleted_at__isnull=True
+            )
+            .select_related("project")
+        )
         count, limit, offset, rows = paginate_queryset(qs, limit, offset)
         return 200, PaginatedResponse(
             count=count, limit=limit, offset=offset,
@@ -191,7 +197,10 @@ class ProjectController:
         )
         if membership.user_id == membership.project.created_by_id:
             raise HttpError(400, "Cannot remove the project creator from the project.")
-        membership.delete()
+        try:
+            membership.delete()
+        except ValidationError as exc:
+            raise HttpError(400, exc.messages[0] if exc.messages else str(exc))
         return 204, None
 
 

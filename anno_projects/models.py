@@ -2,11 +2,14 @@ import hashlib
 import secrets
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
+from anno.models import SoftDeleteModel
 
-class Project(models.Model):
+
+class Project(SoftDeleteModel):
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
     meta_info = models.JSONField(
@@ -27,7 +30,7 @@ class Project(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    class Meta:
+    class Meta(SoftDeleteModel.Meta):
         db_table = "anno_project"
         ordering = ["-created_at"]
         verbose_name = "project"
@@ -50,7 +53,7 @@ class Project(models.Model):
             return None
 
 
-class ProjectMembership(models.Model):
+class ProjectMembership(SoftDeleteModel):
     ROLE_CHOICES = [
         ("worker", "Worker"),
         ("supervisor", "Supervisor"),
@@ -77,18 +80,45 @@ class ProjectMembership(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    class Meta:
+    class Meta(SoftDeleteModel.Meta):
         db_table = "anno_project_membership"
-        unique_together = [("user", "project")]
         ordering = ["created_at"]
         verbose_name = "project membership"
         verbose_name_plural = "project memberships"
+        constraints = [
+            # Only alive memberships are unique, so a removed member can be
+            # re-added.
+            models.UniqueConstraint(
+                fields=["user", "project"],
+                condition=models.Q(deleted_at__isnull=True),
+                name="uniq_active_membership",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.user.username} is {self.role} in {self.project.name}"
 
+    def delete(self, using=None, keep_parents=False):
+        # Preserve the last-supervisor rule here (it used to live in a
+        # pre_delete signal, which no longer fires on soft delete). Uses the
+        # alive-only default manager so a previously removed supervisor does
+        # not count as remaining.
+        if self.role == "supervisor":
+            remaining = (
+                ProjectMembership.objects.filter(
+                    project=self.project, role="supervisor"
+                )
+                .exclude(pk=self.pk)
+                .exists()
+            )
+            if not remaining:
+                raise ValidationError(
+                    "Cannot remove the last supervisor from a project."
+                )
+        return super().delete(using=using, keep_parents=keep_parents)
 
-class ProjectAPIKey(models.Model):
+
+class ProjectAPIKey(SoftDeleteModel):
     """A per-project API key used by external inference workers (Flow A).
 
     Workers authenticate with the plaintext token via the ``X-API-Key`` header;
@@ -126,7 +156,7 @@ class ProjectAPIKey(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    class Meta:
+    class Meta(SoftDeleteModel.Meta):
         db_table = "anno_project_api_key"
         ordering = ["-created_at"]
         verbose_name = "project API key"

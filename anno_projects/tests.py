@@ -2,11 +2,12 @@ import json
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.test import Client, TestCase
 from django.utils import timezone
 from ninja_jwt.tokens import RefreshToken
 
-from anno_projects.models import Project, ProjectAPIKey
+from anno_projects.models import Project, ProjectAPIKey, ProjectMembership
 
 User = get_user_model()
 
@@ -98,6 +99,91 @@ class APIKeyManagementTests(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertFalse(res.json()["is_active"])
         # The worker can no longer authenticate.
+        res2 = self.client.get(
+            "/api/infers/project/images", headers={"X-API-Key": token}
+        )
+        self.assertEqual(res2.status_code, 401)
+
+
+class ProjectSoftDeleteTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.supervisor = User.objects.create_user(username="sup", password="x")
+        self.worker = User.objects.create_user(username="wk", password="x")
+        self.project = Project.objects.create(name="P", created_by=self.supervisor)
+        ProjectMembership.objects.create(
+            user=self.worker, project=self.project, role="worker"
+        )
+
+    def test_soft_delete_project_hides_and_blocks_access(self):
+        res = self.client.delete(
+            f"/api/projects/{self.project.id}",
+            headers=_jwt_headers(self.supervisor),
+        )
+        self.assertEqual(res.status_code, 204)
+        self.assertFalse(Project.objects.filter(pk=self.project.pk).exists())
+        self.assertTrue(Project.all_objects.filter(pk=self.project.pk).exists())
+
+        # Gone from the worker's project list.
+        lst = self.client.get("/api/projects/", headers=_jwt_headers(self.worker))
+        self.assertEqual(lst.status_code, 200)
+        self.assertNotIn(
+            self.project.id, [p["id"] for p in lst.json()["items"]]
+        )
+        # A member is denied on the project's child endpoints.
+        detail = self.client.get(
+            f"/api/projects/{self.project.id}",
+            headers=_jwt_headers(self.worker),
+        )
+        self.assertIn(detail.status_code, (403, 404))
+
+    def test_delete_last_supervisor_blocked(self):
+        membership = ProjectMembership.objects.get(
+            project=self.project, user=self.supervisor
+        )
+        with self.assertRaises(ValidationError):
+            membership.delete()
+        membership.refresh_from_db()
+        self.assertIsNone(membership.deleted_at)
+
+    def test_remove_non_last_supervisor_then_readd(self):
+        sup2 = User.objects.create_user(username="sup2", password="x")
+        ProjectMembership.objects.create(
+            project=self.project, user=sup2, role="supervisor"
+        )
+        remove = self.client.delete(
+            f"/api/projects/{self.project.id}/members/{sup2.id}",
+            headers=_jwt_headers(self.supervisor),
+        )
+        self.assertEqual(remove.status_code, 204)
+        self.assertFalse(
+            ProjectMembership.objects.filter(project=self.project, user=sup2).exists()
+        )
+        # Re-adding the same user succeeds (partial-unique on alive rows).
+        readd = self.client.post(
+            f"/api/projects/{self.project.id}/members",
+            data=json.dumps({"user_id": sup2.id, "role": "supervisor"}),
+            content_type="application/json",
+            headers=_jwt_headers(self.supervisor),
+        )
+        self.assertEqual(readd.status_code, 201)
+        self.assertEqual(
+            ProjectMembership.objects.filter(project=self.project, user=sup2).count(),
+            1,
+        )
+
+    def test_soft_delete_api_key_hidden_and_unusable(self):
+        inst, token = ProjectAPIKey.generate(
+            project=self.project, name="k", created_by=self.supervisor
+        )
+        inst.save()
+        res = self.client.delete(
+            f"/api/projects/{self.project.id}/api-keys/{inst.id}",
+            headers=_jwt_headers(self.supervisor),
+        )
+        self.assertEqual(res.status_code, 204)
+        self.assertFalse(ProjectAPIKey.objects.filter(pk=inst.pk).exists())
+        # A soft-deleted key can no longer authenticate.
         res2 = self.client.get(
             "/api/infers/project/images", headers={"X-API-Key": token}
         )
