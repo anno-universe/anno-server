@@ -54,7 +54,8 @@ class ProjectAPIKeyAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     def get_readonly_fields(self, request, obj=None):
         if obj is None:
             return ["last_used_at", "created_at", "updated_at"]
-        return self.readonly_fields + ["created_by"]
+        # deleted_at is editable=False; surface it read-only on the change form.
+        return self.readonly_fields + ["created_by", "deleted_at"]
 
     def get_fields(self, request, obj=None):
         if obj is None:
