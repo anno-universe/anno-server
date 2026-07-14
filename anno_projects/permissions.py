@@ -1,7 +1,7 @@
 from django.http import HttpRequest
 from ninja_extra.permissions import BasePermission
 
-from .models import ProjectMembership
+from .models import Project, ProjectMembership
 
 
 def _is_admin(user) -> bool:
@@ -27,6 +27,10 @@ class IsProjectMemberOrAdmin(BasePermission):
         project_id = request.resolver_match.kwargs.get("project_id")
         if project_id is None:
             return False
+        # A soft-deleted project (still holding alive memberships) must not
+        # authorize its child endpoints.
+        if not Project.objects.filter(id=project_id).exists():
+            return False
         return ProjectMembership.objects.filter(
             project_id=project_id, user=user,
         ).exists()
@@ -46,6 +50,10 @@ class IsProjectSupervisorOrAdmin(BasePermission):
             return True
         project_id = request.resolver_match.kwargs.get("project_id")
         if project_id is None:
+            return False
+        # A soft-deleted project (still holding alive memberships) must not
+        # authorize its child endpoints.
+        if not Project.objects.filter(id=project_id).exists():
             return False
         return ProjectMembership.objects.filter(
             project_id=project_id, user=user, role="supervisor",

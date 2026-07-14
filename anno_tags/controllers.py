@@ -1,6 +1,6 @@
 import re
 
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from ninja_extra import api_controller, http_delete, http_get, http_patch, http_post
 from ninja_extra.exceptions import HttpError
@@ -67,7 +67,12 @@ class TagController:
     def tag_stats(self, request, project_id: int):
         qs = (
             ProjectTag.objects.filter(project_id=project_id, is_active=True)
-            .annotate(image_count=Count("image_tags"))
+            .annotate(
+                image_count=Count(
+                    "image_tags",
+                    filter=Q(image_tags__deleted_at__isnull=True),
+                )
+            )
             .order_by("-image_count", "name")
         )
         tags = [
@@ -144,7 +149,10 @@ class TagController:
     )
     def delete(self, request, project_id: int, tag_id: int):
         tag = get_object_or_404(ProjectTag, id=tag_id, project_id=project_id)
-        tag.delete()  # CASCADE removes all ImageTag rows
+        # Soft delete does not cascade at the DB level, so soft-delete the tag's
+        # applications explicitly — otherwise the tag would linger on images.
+        tag.image_tags.all().delete()
+        tag.delete()
         return 204, None
 
 

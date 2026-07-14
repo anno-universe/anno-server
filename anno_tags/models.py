@@ -1,8 +1,10 @@
 from django.conf import settings
 from django.db import models
 
+from anno.models import SoftDeleteModel
 
-class ProjectTag(models.Model):
+
+class ProjectTag(SoftDeleteModel):
     """A per-project tag definition.
 
     Supervisors define tags that workers and supervisors can apply to
@@ -45,18 +47,26 @@ class ProjectTag(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    class Meta:
+    class Meta(SoftDeleteModel.Meta):
         db_table = "anno_project_tag"
         ordering = ["name"]
         verbose_name = "project tag"
         verbose_name_plural = "project tags"
-        unique_together = [("project", "name")]
+        constraints = [
+            # Only alive tags are unique per project, so a soft-deleted name
+            # can be reused.
+            models.UniqueConstraint(
+                fields=["project", "name"],
+                condition=models.Q(deleted_at__isnull=True),
+                name="uniq_active_project_tag_name",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.name} ({self.project.name})"
 
 
-class ImageTag(models.Model):
+class ImageTag(SoftDeleteModel):
     """Associates a tag with a specific image.
 
     Each image can have at most one instance of each tag.  Tags track
@@ -85,12 +95,19 @@ class ImageTag(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
-    class Meta:
+    class Meta(SoftDeleteModel.Meta):
         db_table = "anno_image_tag"
         ordering = ["-created_at"]
         verbose_name = "image tag"
         verbose_name_plural = "image tags"
-        unique_together = [("image", "tag")]
+        constraints = [
+            # Only alive rows are unique, so re-applying a soft-deleted tag works.
+            models.UniqueConstraint(
+                fields=["image", "tag"],
+                condition=models.Q(deleted_at__isnull=True),
+                name="uniq_active_image_tag",
+            ),
+        ]
         indexes = [
             models.Index(fields=["image"]),
             models.Index(fields=["tag"]),

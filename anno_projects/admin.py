@@ -2,27 +2,29 @@ from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
 from django.utils.html import format_html
 
+from anno.admin import SoftDeleteAdminMixin
+
 from .models import Project, ProjectAPIKey, ProjectMembership
 
 
 @admin.register(Project)
-class ProjectAdmin(admin.ModelAdmin):
-    list_display = ["id", "name", "created_by", "created_at", "updated_at"]
+class ProjectAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
+    list_display = ["id", "name", "created_by", "deleted_at", "created_at", "updated_at"]
     list_filter = ["created_at"]
     search_fields = ["name", "description"]
     readonly_fields = ["created_at", "updated_at"]
 
 
 @admin.register(ProjectMembership)
-class ProjectMembershipAdmin(admin.ModelAdmin):
-    list_display = ["id", "user", "project", "role", "added_by", "created_at"]
+class ProjectMembershipAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
+    list_display = ["id", "user", "project", "role", "added_by", "deleted_at", "created_at"]
     list_filter = ["role", "project", "created_at"]
     search_fields = ["user__username", "project__name"]
     readonly_fields = ["created_at", "updated_at"]
 
 
 @admin.register(ProjectAPIKey)
-class ProjectAPIKeyAdmin(admin.ModelAdmin):
+class ProjectAPIKeyAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     list_display = [
         "id",
         "name",

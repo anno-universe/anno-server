@@ -20,6 +20,8 @@ to the ``Annotation2D`` it became (the reverse-lookup target for
 from django.conf import settings
 from django.db import models
 
+from anno.models import SoftDeleteModel
+
 # Annotation geometry types an inference service may declare / return.
 RESULT_TYPE_CHOICES = [
     ("polygon", "Polygon"),
@@ -39,7 +41,7 @@ PROMPT_TYPE_CHOICES = [
 VALID_PROMPT_TYPES = frozenset(t for t, _ in PROMPT_TYPE_CHOICES)
 
 
-class InferenceServiceProvider(models.Model):
+class InferenceServiceProvider(SoftDeleteModel):
     """A registered inference service the server can call to auto-annotate.
 
     ``project`` is nullable: a ``null`` row is a *global* provider (admin
@@ -107,7 +109,7 @@ class InferenceServiceProvider(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    class Meta:
+    class Meta(SoftDeleteModel.Meta):
         db_table = "anno_inference_provider"
         ordering = ["-created_at"]
         indexes = [
@@ -309,7 +311,7 @@ class InferenceResult(models.Model):
 # ---------------------------------------------------------------------------
 
 
-class InteractiveInferenceServiceProvider(models.Model):
+class InteractiveInferenceServiceProvider(SoftDeleteModel):
     """A registered interactive inference service the server can call.
 
     Like :class:`InferenceServiceProvider` but the service is prompt-driven:
@@ -390,7 +392,7 @@ class InteractiveInferenceServiceProvider(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    class Meta:
+    class Meta(SoftDeleteModel.Meta):
         db_table = "anno_interactive_inference_provider"
         ordering = ["-created_at"]
         indexes = [

@@ -1,10 +1,12 @@
 from django.contrib import admin
 
+from anno.admin import SoftDeleteAdminMixin
+
 from .models import ProjectTag, ImageTag
 
 
 @admin.register(ProjectTag)
-class ProjectTagAdmin(admin.ModelAdmin):
+class ProjectTagAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     list_display = [
         "id",
         "name",
@@ -12,6 +14,7 @@ class ProjectTagAdmin(admin.ModelAdmin):
         "project",
         "color",
         "is_active",
+        "deleted_at",
         "created_by",
         "created_at",
     ]
@@ -21,8 +24,8 @@ class ProjectTagAdmin(admin.ModelAdmin):
 
 
 @admin.register(ImageTag)
-class ImageTagAdmin(admin.ModelAdmin):
-    list_display = ["id", "image", "tag", "applied_by", "created_at"]
+class ImageTagAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
+    list_display = ["id", "image", "tag", "applied_by", "deleted_at", "created_at"]
     list_filter = ["tag", "created_at"]
     search_fields = ["image__file_name", "tag__name"]
     readonly_fields = ["created_at"]
