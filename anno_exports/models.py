@@ -52,8 +52,6 @@ class ExportTask(SoftDeleteModel):
         default=None,
         help_text="When the export file should be cleaned up (null = never expire).",
     )
-    total_items = models.PositiveIntegerField(default=0)
-    completed_items = models.PositiveIntegerField(default=0)
     error = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
