@@ -17,6 +17,16 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # gunicorn only execs after the entrypoint's `migrate` finishes (RUN_MODE=server),
+    # so a passing healthcheck means migrations are done — anno-scheduler gates on
+    # this before touching its django_apscheduler job-store table. No -f, so any HTTP
+    # response (404/302/500 included) counts as up; only a refused connection fails.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sS -o /dev/null http://localhost:8000/"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   anno-worker:
     image: ghcr.io/anno-universe/anno-server:latest
@@ -55,6 +65,10 @@ services:
       - anno-network
     depends_on:
       postgres:
+        condition: service_healthy
+      # Wait for migrations (run only by anno-server) before starting; the job
+      # store lives in django_apscheduler_djangojob, created by that migrate.
+      anno-server:
         condition: service_healthy
 
   postgres:

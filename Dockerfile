@@ -26,6 +26,7 @@ RUN uv sync --frozen --no-dev --no-editable
 FROM python:3.13-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
     libjpeg62-turbo \
     libopenjp2-7 \
     libtiff6 \
