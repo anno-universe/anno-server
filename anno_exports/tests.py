@@ -368,7 +368,6 @@ class ExportTaskExecutionTest(TestCase):
         execute_export(task.id)
         task.refresh_from_db()
         self.assertEqual(task.status, ExportTask.STATUS_COMPLETED)
-        self.assertEqual(task.completed_items, 1)
         result = ExportTaskResult.objects.get(task=task)
         self.assertTrue(result.file_available)
         self.assertGreater(result.file_size, 0)

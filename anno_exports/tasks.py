@@ -66,12 +66,11 @@ def execute_export(task_id: int) -> None:
         task.save(update_fields=["status", "error", "finished_at"])
         return
 
-    task.total_items = len(images)
-    if task.total_items == 0:
+    if len(images) == 0:
         task.status = ExportTask.STATUS_FAILED
         task.error = "No images with active annotations found."
         task.finished_at = timezone.now()
-        task.save(update_fields=["total_items", "status", "error", "finished_at"])
+        task.save(update_fields=["status", "error", "finished_at"])
         return
 
     label_mapping = task.project.label_mapping or {}
@@ -130,8 +129,7 @@ def execute_export(task_id: int) -> None:
                 result.save()
 
         task.status = ExportTask.STATUS_COMPLETED
-        task.completed_items = task.total_items
-        logger.info("Export task %d completed: %d items", task_id, task.total_items)
+        logger.info("Export task %d completed: %d images", task_id, len(images))
 
     except Exception as exc:
         logger.error("Export task %d failed: %s", task_id, exc, exc_info=True)
@@ -139,4 +137,4 @@ def execute_export(task_id: int) -> None:
         task.error = str(exc)
 
     task.finished_at = timezone.now()
-    task.save(update_fields=["status", "completed_items", "error", "finished_at"])
+    task.save(update_fields=["status", "error", "finished_at"])

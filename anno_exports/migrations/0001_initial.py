@@ -26,8 +26,6 @@ class Migration(migrations.Migration):
                 ('include_images', models.BooleanField(default=False)),
                 ('status', models.CharField(choices=[('pending', 'Pending'), ('running', 'Running'), ('completed', 'Completed'), ('failed', 'Failed'), ('cancelled', 'Cancelled')], db_index=True, default='pending', max_length=20)),
                 ('expires_at', models.DateTimeField(blank=True, default=None, help_text='When the export file should be cleaned up (null = never expire).', null=True)),
-                ('total_items', models.PositiveIntegerField(default=0)),
-                ('completed_items', models.PositiveIntegerField(default=0)),
                 ('error', models.TextField(blank=True, default='')),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('started_at', models.DateTimeField(blank=True, null=True)),

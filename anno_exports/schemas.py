@@ -50,8 +50,6 @@ class ExportTaskOutput(Schema):
     include_images: bool
     status: str
     expires_at: datetime | None
-    total_items: int
-    completed_items: int
     error: str
     created_at: datetime
     started_at: datetime | None
@@ -67,8 +65,6 @@ class ExportTaskOutput(Schema):
             include_images=task.include_images,
             status=task.status,
             expires_at=task.expires_at,
-            total_items=task.total_items,
-            completed_items=task.completed_items,
             error=task.error,
             created_at=task.created_at,
             started_at=task.started_at,
