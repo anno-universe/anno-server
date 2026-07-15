@@ -48,6 +48,8 @@ INSTALLED_APPS = [
     "anno_tags",
     "anno_images",
     "anno_infers",
+    "anno_exports",
+    "django_apscheduler",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -188,6 +190,18 @@ TASKS = {
         "QUEUES": ["default"],
     }
 }
+
+# Export settings
+EXPORT_DEFAULT_RETENTION_HOURS = int(
+    os.environ.get("EXPORT_DEFAULT_RETENTION_HOURS", "24")
+)
+EXPORT_CLEANUP_INTERVAL_MINUTES = int(
+    os.environ.get("EXPORT_CLEANUP_INTERVAL_MINUTES", "10")
+)
+
+# django-apscheduler config
+APSCHEDULER_DATETIME_FORMAT = "N j, Y, f:s a"
+APSCHEDULER_RUN_NOW_TIMEOUT = 25
 
 STORAGES = {
     "default": {

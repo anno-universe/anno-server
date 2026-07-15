@@ -38,6 +38,25 @@ services:
       postgres:
         condition: service_healthy
 
+  anno-scheduler:
+    image: ghcr.io/anno-universe/anno-server:latest
+    container_name: anno-scheduler
+    restart: unless-stopped
+    command: python manage.py run_scheduler
+    environment:
+      RUN_MODE: scheduler
+      SECRET_KEY: ${SECRET_KEY:?err}
+      DEBUG: "false"
+      DATABASE_HOST: postgres
+      EXPORT_CLEANUP_INTERVAL_MINUTES: ${EXPORT_CLEANUP_INTERVAL_MINUTES:-10}
+    volumes:
+      - media_data:/app/media
+    networks:
+      - anno-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   postgres:
     image: postgres:16-alpine
     container_name: anno-postgres
