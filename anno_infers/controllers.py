@@ -70,7 +70,7 @@ INTERACTIVE_TOKEN_HEADER = "X-Session-Token"
 # ---------------------------------------------------------------------------
 
 
-@api_controller("/infers/project", tags=["infer-project"])
+@api_controller("/project-api", tags=["project-api"])
 class ProjectInferController:
 
     # -- project meta --------------------------------------------------------
@@ -80,7 +80,7 @@ class ProjectInferController:
         permissions=[AllowAny],
         auth=ProjectAPIKeyAuth(),
         response={200: ProjectMetaOutput},
-        url_name="infer_project_meta",
+        url_name="project_api_meta",
     )
     def project_meta(self, request):
         return 200, ProjectMetaOutput.from_project(request.project)
@@ -92,7 +92,7 @@ class ProjectInferController:
         permissions=[AllowAny],
         auth=ProjectAPIKeyAuth(),
         response={200: PaginatedResponse[ProjectImageOutput]},
-        url_name="infer_project_image_list",
+        url_name="project_api_image_list",
     )
     def list_images(
         self,
@@ -120,7 +120,7 @@ class ProjectInferController:
         permissions=[AllowAny],
         auth=ProjectAPIKeyAuth(),
         response={200: ProjectImageOutput},
-        url_name="infer_project_image_detail",
+        url_name="project_api_image_detail",
     )
     def image_detail(self, request, image_id: int):
         img = get_object_or_404(Image2D, id=image_id, project=request.project)
@@ -130,7 +130,7 @@ class ProjectInferController:
         "/images/{image_id}/original_file",
         permissions=[AllowAny],
         auth=ProjectAPIKeyAuth(),
-        url_name="infer_project_image_file",
+        url_name="project_api_image_file",
     )
     def image_file(self, request, image_id: int):
         img = get_object_or_404(Image2D, id=image_id, project=request.project)
@@ -138,12 +138,29 @@ class ProjectInferController:
 
     # -- annotations ---------------------------------------------------------
 
+    @http_get(
+        "/images/{image_id}/annotations",
+        permissions=[AllowAny],
+        auth=ProjectAPIKeyAuth(),
+        response={200: list[ProjectAnnotationModifyOutput]},
+        url_name="project_api_image_annotation_list",
+    )
+    def list_image_annotations(self, request, image_id: int):
+        """List all active annotations for an image."""
+        _ = get_object_or_404(Image2D, id=image_id, project=request.project)
+        qs = Annotation2D.objects.filter(
+            image_id=image_id,
+            project=request.project,
+            is_active=True,
+        ).select_related("polygon", "box", "keypoint").order_by("id")
+        return 200, [ProjectAnnotationModifyOutput.from_annotation(a) for a in qs]
+
     @http_post(
         "/images/{image_id}/annotations",
         permissions=[AllowAny],
         auth=ProjectAPIKeyAuth(),
         response={200: ProjectAnnotationBatchOutput},
-        url_name="infer_project_image_annotation_submit",
+        url_name="project_api_image_annotation_submit",
     )
     def submit_image_annotations(
         self,
@@ -207,7 +224,7 @@ class ProjectInferController:
         permissions=[AllowAny],
         auth=ProjectAPIKeyAuth(),
         response={200: ProjectAnnotationModifyOutput},
-        url_name="infer_project_image_annotation_modify",
+        url_name="project_api_image_annotation_modify",
     )
     @transaction.atomic
     def modify_image_annotation(
