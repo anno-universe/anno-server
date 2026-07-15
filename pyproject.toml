@@ -15,6 +15,8 @@ dependencies = [
     "pillow>=12.2.0",
     "httpx>=0.28.1",
     "django-tasks-db>=0.12.0",
+    "django-apscheduler>=0.6.0",
+    "apscheduler>=3.10.0",
     "gunicorn>=23.0.0",
     "anno-sdk",
     "whitenoise>=6.12.0",
