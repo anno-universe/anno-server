@@ -20,21 +20,23 @@ def _cleanup_expired_exports():
     cleaned = 0
     for task in expired:
         result = getattr(task, "result", None)
-        if result is None or not result.export_file:
-            continue
-        try:
-            result.export_file.delete(save=False)
-            result.export_file = None
-            result.file_deleted_at = timezone.now()
-            result.save(update_fields=["export_file", "file_deleted_at"])
-            cleaned += 1
-        except Exception:
-            logger.warning(
-                "Failed to clean up export file for task %d", task.id, exc_info=True
-            )
+        if result is not None and result.export_file:
+            try:
+                result.export_file.delete(save=False)
+                result.export_file = None
+                result.file_deleted_at = timezone.now()
+                result.save(update_fields=["export_file", "file_deleted_at"])
+            except Exception:
+                logger.warning(
+                    "Failed to clean up export file for task %d", task.id, exc_info=True
+                )
+
+        task.status = ExportTask.STATUS_EXPIRED
+        task.save(update_fields=["status"])
+        cleaned += 1
 
     if cleaned:
-        logger.info("Cleaned up %d expired export file(s).", cleaned)
+        logger.info("Cleaned up %d expired export(s).", cleaned)
 
 
 class Command(BaseCommand):

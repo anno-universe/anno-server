@@ -16,12 +16,14 @@ class ExportTask(SoftDeleteModel):
     STATUS_COMPLETED = "completed"
     STATUS_FAILED = "failed"
     STATUS_CANCELLED = "cancelled"
+    STATUS_EXPIRED = "expired"
     STATUS_CHOICES = [
         (STATUS_PENDING, "Pending"),
         (STATUS_RUNNING, "Running"),
         (STATUS_COMPLETED, "Completed"),
         (STATUS_FAILED, "Failed"),
         (STATUS_CANCELLED, "Cancelled"),
+        (STATUS_EXPIRED, "Expired"),
     ]
 
     FORMAT_COCO = "coco"

@@ -17,6 +17,7 @@ from ninja_jwt.tokens import RefreshToken
 from anno_images.models import Annotation2D, Box2D, Image2D, Keypoint2D, Polygon2D
 from anno_projects.models import Project, ProjectMembership
 
+from anno_exports.management.commands.run_scheduler import _cleanup_expired_exports
 from anno_exports.models import ExportTask, ExportTaskResult
 from anno_exports.schemas import ExportTaskDetailOutput, ExportTaskOutput
 from anno_exports.services import (
@@ -582,3 +583,95 @@ class ExportAPITest(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["id"], task.id)
         self.assertIsNone(res.json()["result"])
+
+
+# ---------------------------------------------------------------------------
+# Expired export cleanup
+# ---------------------------------------------------------------------------
+
+
+@override_settings(STORAGES=_TEST_STORAGES)
+class ExpiredExportCleanupTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="a", password="x")
+        self.project = Project.objects.create(
+            name="Test", label_mapping={"a": 0}, created_by=self.user,
+        )
+
+    def test_cleanup_marks_as_expired(self):
+        task = ExportTask.objects.create(
+            project=self.project,
+            created_by=self.user,
+            format="coco",
+            status=ExportTask.STATUS_COMPLETED,
+            expires_at=timezone.now() - timedelta(hours=1),
+        )
+        ExportTaskResult.objects.create(task=task)
+
+        _cleanup_expired_exports()
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, ExportTask.STATUS_EXPIRED)
+
+    def test_cleanup_moves_file_and_marks_expired(self):
+        task = ExportTask.objects.create(
+            project=self.project,
+            created_by=self.user,
+            format="coco",
+            status=ExportTask.STATUS_COMPLETED,
+            expires_at=timezone.now() - timedelta(hours=1),
+        )
+        result = ExportTaskResult.objects.create(task=task)
+        result.export_file.save("test.zip", ContentFile(b"data"), save=True)
+
+        _cleanup_expired_exports()
+
+        task.refresh_from_db()
+        result.refresh_from_db()
+        self.assertEqual(task.status, ExportTask.STATUS_EXPIRED)
+        self.assertFalse(bool(result.export_file))
+        self.assertIsNotNone(result.file_deleted_at)
+
+    def test_non_expired_ignored(self):
+        task = ExportTask.objects.create(
+            project=self.project,
+            created_by=self.user,
+            format="coco",
+            status=ExportTask.STATUS_COMPLETED,
+            expires_at=timezone.now() + timedelta(hours=1),
+        )
+        ExportTaskResult.objects.create(task=task)
+
+        _cleanup_expired_exports()
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, ExportTask.STATUS_COMPLETED)
+
+    def test_expired_without_result_marked_expired(self):
+        task = ExportTask.objects.create(
+            project=self.project,
+            created_by=self.user,
+            format="coco",
+            status=ExportTask.STATUS_COMPLETED,
+            expires_at=timezone.now() - timedelta(hours=1),
+        )
+
+        _cleanup_expired_exports()
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, ExportTask.STATUS_EXPIRED)
+
+    def test_no_expiry_not_cleaned(self):
+        task = ExportTask.objects.create(
+            project=self.project,
+            created_by=self.user,
+            format="coco",
+            status=ExportTask.STATUS_COMPLETED,
+            expires_at=None,
+        )
+        ExportTaskResult.objects.create(task=task)
+
+        _cleanup_expired_exports()
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, ExportTask.STATUS_COMPLETED)
