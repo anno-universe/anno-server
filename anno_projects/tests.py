@@ -84,7 +84,7 @@ class APIKeyManagementTests(TestCase):
         self.assertIn(res.status_code, (401, 403))
         self.assertEqual(ProjectAPIKey.objects.count(), 0)
 
-    def test_revoke_then_worker_unauthorized(self):
+    def test_revoke_then_project_api_client_unauthorized(self):
         inst, token = ProjectAPIKey.generate(
             project=self.project, name="k", created_by=self.supervisor
         )
@@ -98,9 +98,9 @@ class APIKeyManagementTests(TestCase):
         )
         self.assertEqual(res.status_code, 200)
         self.assertFalse(res.json()["is_active"])
-        # The worker can no longer authenticate.
+        # The Project API client can no longer authenticate.
         res2 = self.client.get(
-            "/api/infers/project/images", headers={"X-API-Key": token}
+            "/api/project-api/images", headers={"X-API-Key": token}
         )
         self.assertEqual(res2.status_code, 401)
 
@@ -185,6 +185,6 @@ class ProjectSoftDeleteTests(TestCase):
         self.assertFalse(ProjectAPIKey.objects.filter(pk=inst.pk).exists())
         # A soft-deleted key can no longer authenticate.
         res2 = self.client.get(
-            "/api/infers/project/images", headers={"X-API-Key": token}
+            "/api/project-api/images", headers={"X-API-Key": token}
         )
         self.assertEqual(res2.status_code, 401)

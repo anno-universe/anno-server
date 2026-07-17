@@ -119,7 +119,7 @@ class ProjectMembership(SoftDeleteModel):
 
 
 class ProjectAPIKey(SoftDeleteModel):
-    """A per-project API key used by external inference workers (Flow A).
+    """A per-project API key used by external Project API clients.
 
     Workers authenticate with the plaintext token via the ``X-API-Key`` header;
     only a SHA-256 hash is persisted. The ``prefix`` is a non-secret leading

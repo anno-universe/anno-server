@@ -1,11 +1,16 @@
 import json
+import tempfile
 from datetime import timedelta
+from io import BytesIO
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
+from django.test.utils import override_settings
 from django.utils import timezone
+from PIL import Image as PILImage
 
-from anno_images.models import Annotation2D, Box2D, Image2D, Keypoint2D, Operation
+from anno_images.models import Annotation2D, Image2D, Operation
 from anno_projects.models import Project, ProjectAPIKey
 
 User = get_user_model()
@@ -13,7 +18,7 @@ User = get_user_model()
 
 def _make_image(project, name="a.png"):
     # Assign the storage name directly (a string) so no real upload to S3 happens;
-    # the worker list/submit paths never read the file bytes.
+    # the Project API list/submit paths never read the file bytes.
     return Image2D.objects.create(
         project=project,
         image=f"images/{project.id}/{name}",
@@ -23,8 +28,14 @@ def _make_image(project, name="a.png"):
     )
 
 
-class ProjectInferAPITests(TestCase):
+class ProjectAPITests(TestCase):
     def setUp(self):
+        self._media_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._media_dir.cleanup)
+        self._media_override = override_settings(MEDIA_ROOT=self._media_dir.name)
+        self._media_override.enable()
+        self.addCleanup(self._media_override.disable)
+
         self.client = Client()
         self.supervisor = User.objects.create_user(username="sup", password="x")
         self.project = Project.objects.create(
@@ -47,9 +58,15 @@ class ProjectInferAPITests(TestCase):
     def _hdr(self, token=None):
         return {"X-API-Key": token or self.token}
 
+    @staticmethod
+    def _png_upload(name="upload.png", size=(32, 24)):
+        data = BytesIO()
+        PILImage.new("RGB", size, color="red").save(data, format="PNG")
+        return SimpleUploadedFile(name, data.getvalue(), content_type="image/png")
+
     def test_project_meta(self):
         res = self.client.get(
-            "/api/infers/project/meta", headers=self._hdr()
+            "/api/project-api/meta", headers=self._hdr()
         )
         self.assertEqual(res.status_code, 200)
         data = res.json()
@@ -59,13 +76,13 @@ class ProjectInferAPITests(TestCase):
         self.assertEqual(data["label_mapping"], {"cat": 0, "dog": 1})
         # The other project's meta is inaccessible with this key.
         res2 = self.client.get(
-            "/api/infers/project/meta",
+            "/api/project-api/meta",
             headers={"X-API-Key": "ak_dead.beef"},
         )
         self.assertEqual(res2.status_code, 401)
 
     def test_list_images_scoped_to_project(self):
-        res = self.client.get("/api/infers/project/images", headers=self._hdr())
+        res = self.client.get("/api/project-api/images", headers=self._hdr())
         self.assertEqual(res.status_code, 200)
         data = res.json()
         ids = [i["id"] for i in data["items"]]
@@ -74,25 +91,66 @@ class ProjectInferAPITests(TestCase):
         self.assertEqual(data["count"], 1)
 
     def test_missing_key_returns_401(self):
-        res = self.client.get("/api/infers/project/images")
+        res = self.client.get("/api/project-api/images")
         self.assertEqual(res.status_code, 401)
 
     def test_wrong_key_returns_401(self):
         res = self.client.get(
-            "/api/infers/project/images", headers=self._hdr("ak_dead.beef")
+            "/api/project-api/images", headers=self._hdr("ak_dead.beef")
         )
         self.assertEqual(res.status_code, 401)
 
     def test_revoked_key_returns_401(self):
         self.key_obj.is_active = False
         self.key_obj.save(update_fields=["is_active"])
-        res = self.client.get("/api/infers/project/images", headers=self._hdr())
+        res = self.client.get("/api/project-api/images", headers=self._hdr())
         self.assertEqual(res.status_code, 401)
 
     def test_expired_key_returns_401(self):
         self.key_obj.expires_at = timezone.now() - timedelta(seconds=1)
         self.key_obj.save(update_fields=["expires_at"])
-        res = self.client.get("/api/infers/project/images", headers=self._hdr())
+        res = self.client.get("/api/project-api/images", headers=self._hdr())
+        self.assertEqual(res.status_code, 401)
+
+    def test_upload_image(self):
+        res = self.client.post(
+            "/api/project-api/images",
+            data={"file": self._png_upload("sdk-upload.png", (32, 24))},
+            headers=self._hdr(),
+        )
+
+        self.assertEqual(res.status_code, 201)
+        body = res.json()
+        image = Image2D.objects.get(id=body["id"])
+        self.assertEqual(image.project, self.project)
+        self.assertEqual(image.file_name, "sdk-upload.png")
+        self.assertEqual((image.width, image.height), (32, 24))
+        self.assertEqual(body["project_id"], self.project.id)
+        self.assertEqual(body["file_name"], "sdk-upload.png")
+        self.assertEqual((body["width"], body["height"]), (32, 24))
+        self.assertEqual(body["tags"], [])
+
+    def test_upload_rejects_invalid_image(self):
+        before = Image2D.objects.count()
+        res = self.client.post(
+            "/api/project-api/images",
+            data={
+                "file": SimpleUploadedFile(
+                    "invalid.png", b"not an image", content_type="image/png"
+                )
+            },
+            headers=self._hdr(),
+        )
+
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(Image2D.objects.count(), before)
+
+    def test_upload_requires_api_key(self):
+        res = self.client.post(
+            "/api/project-api/images",
+            data={"file": self._png_upload()},
+        )
+
         self.assertEqual(res.status_code, 401)
 
     # -- per-image annotation submission ---------------------------------
@@ -116,7 +174,7 @@ class ProjectInferAPITests(TestCase):
             ]
         }
         res = self.client.post(
-            f"/api/infers/project/images/{self.image.id}/annotations",
+            f"/api/project-api/images/{self.image.id}/annotations",
             data=json.dumps(payload),
             content_type="application/json",
             headers=self._hdr(),
@@ -149,7 +207,7 @@ class ProjectInferAPITests(TestCase):
             ]
         }
         res = self.client.post(
-            "/api/infers/project/images/99999/annotations",
+            "/api/project-api/images/99999/annotations",
             data=json.dumps(payload),
             content_type="application/json",
             headers=self._hdr(),
@@ -167,7 +225,7 @@ class ProjectInferAPITests(TestCase):
             ]
         }
         res = self.client.post(
-            f"/api/infers/project/images/{self.other_image.id}/annotations",
+            f"/api/project-api/images/{self.other_image.id}/annotations",
             data=json.dumps(payload),
             content_type="application/json",
             headers=self._hdr(),
@@ -194,7 +252,7 @@ class ProjectInferAPITests(TestCase):
             ]
         }
         res = self.client.post(
-            f"/api/infers/project/images/{self.image.id}/annotations",
+            f"/api/project-api/images/{self.image.id}/annotations",
             data=json.dumps(payload),
             content_type="application/json",
             headers=self._hdr(),
@@ -217,7 +275,7 @@ class ProjectInferAPITests(TestCase):
             ]
         }
         res = self.client.post(
-            f"/api/infers/project/images/{self.image.id}/annotations",
+            f"/api/project-api/images/{self.image.id}/annotations",
             data=json.dumps(payload),
             content_type="application/json",
             headers=self._hdr(),
@@ -234,7 +292,7 @@ class ProjectInferAPITests(TestCase):
             ]
         }
         res = self.client.post(
-            f"/api/infers/project/images/{self.image.id}/annotations",
+            f"/api/project-api/images/{self.image.id}/annotations",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -254,7 +312,7 @@ class ProjectInferAPITests(TestCase):
             ]
         }
         res = self.client.post(
-            f"/api/infers/project/images/{self.image.id}/annotations",
+            f"/api/project-api/images/{self.image.id}/annotations",
             data=json.dumps(payload),
             content_type="application/json",
             headers=self._hdr(),
@@ -273,7 +331,7 @@ class ProjectInferAPITests(TestCase):
             "box": {"x": 10, "y": 20, "width": 30, "height": 40},
         }
         res = self.client.patch(
-            f"/api/infers/project/images/{self.image.id}/annotations/{ann_id}",
+            f"/api/project-api/images/{self.image.id}/annotations/{ann_id}",
             data=json.dumps(payload),
             content_type="application/json",
             headers=self._hdr(),
@@ -306,7 +364,7 @@ class ProjectInferAPITests(TestCase):
             "keypoint": {"points": [[3, 4]]},
         }
         res = self.client.patch(
-            f"/api/infers/project/images/{self.image.id}/annotations/{ann_id}",
+            f"/api/project-api/images/{self.image.id}/annotations/{ann_id}",
             data=json.dumps(payload),
             content_type="application/json",
             headers=self._hdr(),
@@ -323,7 +381,7 @@ class ProjectInferAPITests(TestCase):
             "box": {"x": 0, "y": 0, "width": 1, "height": 1},
         }
         res = self.client.patch(
-            f"/api/infers/project/images/{self.image.id}/annotations/99999",
+            f"/api/project-api/images/{self.image.id}/annotations/99999",
             data=json.dumps(payload),
             content_type="application/json",
             headers=self._hdr(),
@@ -346,7 +404,7 @@ class ProjectInferAPITests(TestCase):
             ]
         }
         res = self.client.post(
-            f"/api/infers/project/images/{self.other_image.id}/annotations",
+            f"/api/project-api/images/{self.other_image.id}/annotations",
             data=json.dumps(payload),
             content_type="application/json",
             headers={"X-API-Key": other_token},
@@ -359,7 +417,7 @@ class ProjectInferAPITests(TestCase):
             "box": {"x": 5, "y": 5, "width": 2, "height": 2},
         }
         res2 = self.client.patch(
-            f"/api/infers/project/images/{self.other_image.id}/annotations/{other_ann_id}",
+            f"/api/project-api/images/{self.other_image.id}/annotations/{other_ann_id}",
             data=json.dumps(payload2),
             content_type="application/json",
             headers=self._hdr(),
@@ -376,7 +434,7 @@ class ProjectInferAPITests(TestCase):
             "box": {"x": 5, "y": 5, "width": 2, "height": 2},
         }
         res = self.client.patch(
-            f"/api/infers/project/images/{self.image.id}/annotations/{ann_id}",
+            f"/api/project-api/images/{self.image.id}/annotations/{ann_id}",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -397,7 +455,7 @@ class ProjectInferAPITests(TestCase):
             "box": {"x": 5, "y": 5, "width": 2, "height": 2},
         }
         res = self.client.patch(
-            f"/api/infers/project/images/{self.image.id}/annotations/{ann_id}",
+            f"/api/project-api/images/{self.image.id}/annotations/{ann_id}",
             data=json.dumps(payload),
             content_type="application/json",
             headers=self._hdr(),
@@ -406,12 +464,12 @@ class ProjectInferAPITests(TestCase):
 
     def test_has_active_annotations_filter(self):
         res = self.client.get(
-            "/api/infers/project/images?has_active_annotations=false",
+            "/api/project-api/images?has_active_annotations=false",
             headers=self._hdr(),
         )
         self.assertEqual([i["id"] for i in res.json()["items"]], [self.image.id])
         res = self.client.get(
-            "/api/infers/project/images?has_active_annotations=true",
+            "/api/project-api/images?has_active_annotations=true",
             headers=self._hdr(),
         )
         self.assertEqual(res.json()["items"], [])
