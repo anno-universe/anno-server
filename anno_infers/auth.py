@@ -11,7 +11,7 @@ _LAST_USED_THROTTLE = timedelta(seconds=60)
 
 
 class ProjectAPIKeyAuth(APIKeyHeader):
-    """Authenticate inference workers by a per-project API key (Flow A).
+    """Authenticate Project API clients by a per-project API key.
 
     The full token is sent in the ``X-API-Key`` header; we hash it and look the
     key up by hash. On success the resolved key and its project are stashed on

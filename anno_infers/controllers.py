@@ -4,18 +4,20 @@ from datetime import timedelta
 from django.conf import settings as django_settings
 from django.db import transaction
 from django.db.models import Q
-from django.http import FileResponse, StreamingHttpResponse
+from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-
-logger = logging.getLogger(__name__)
+from ninja import File
+from ninja.files import UploadedFile
 from ninja_extra import api_controller, http_delete, http_get, http_patch, http_post
 from ninja_extra.exceptions import HttpError
 from ninja_extra.permissions import AllowAny, IsAuthenticated
 from ninja_jwt.authentication import JWTAuth
+from PIL import Image as PILImage
 
 from anno.pagination import PaginatedResponse, paginate_queryset
 from anno_images.models import Annotation2D, Image2D, Operation
+from anno_images.schemas import Image2DOutput
 from anno_projects.models import Project, ProjectMembership
 from anno_projects.permissions import IsProjectMemberOrAdmin, IsProjectSupervisorOrAdmin
 
@@ -57,21 +59,22 @@ from . import services
 from .services import create_ai_annotation, modify_ai_annotation, provider_snapshot
 from .tasks import run_inference_run
 
+logger = logging.getLogger(__name__)
+
 #: Header the browser presents the session token in on its direct service calls.
 #: Matches the anno-sdk interactive server default (``X-Session-Token``).
 INTERACTIVE_TOKEN_HEADER = "X-Session-Token"
 
 # ---------------------------------------------------------------------------
-# Project inference endpoints (API-key auth; project implied by the key)
+# Project API endpoints (API-key auth; project implied by the key)
 #
-# The edge side authenticates with a per-project API key and accesses the
-# project's resources: metadata (label mapping, etc.), images, and annotation
-# submission.
+# anno-sdk authenticates with a per-project API key and accesses the project's
+# resources: metadata (label mapping, etc.), images, and annotations.
 # ---------------------------------------------------------------------------
 
 
 @api_controller("/project-api", tags=["project-api"])
-class ProjectInferController:
+class ProjectAPIController:
 
     # -- project meta --------------------------------------------------------
 
@@ -86,6 +89,42 @@ class ProjectInferController:
         return 200, ProjectMetaOutput.from_project(request.project)
 
     # -- images --------------------------------------------------------------
+
+    @http_post(
+        "/images",
+        permissions=[AllowAny],
+        auth=ProjectAPIKeyAuth(),
+        response={201: Image2DOutput},
+        url_name="project_api_image_upload",
+    )
+    def upload_image(self, request, file: File[UploadedFile]):
+        """Upload an image to the project associated with the API key."""
+        try:
+            with PILImage.open(file) as pil_img:
+                width, height = pil_img.size
+                pil_img.verify()
+        except Exception as exc:
+            raise HttpError(400, "Invalid image file.") from exc
+        finally:
+            file.seek(0)
+
+        try:
+            img = Image2D.objects.create(
+                project=request.project,
+                image=file,
+                file_name=file.name,
+                width=width,
+                height=height,
+            )
+        except Exception:
+            logger.exception(
+                "Project API image upload failed for project %d: %s",
+                request.project.id,
+                file.name,
+            )
+            raise HttpError(500, "Image upload failed.")
+
+        return 201, Image2DOutput.from_image(img)
 
     @http_get(
         "/images",
@@ -974,5 +1013,3 @@ class InteractiveSessionController:
 #   • supervisor — only seats in projects they supervise
 #   • others     — 403
 # ---------------------------------------------------------------------------
-
-
