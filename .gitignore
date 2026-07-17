@@ -12,6 +12,9 @@ wheels/
 # Environment secrets
 .env
 
+# macOS metadata
+.DS_Store
+
 # Django static files
 staticfiles/
 media/
