@@ -11,6 +11,7 @@ class TagCreateInput(Schema):
     display_name: str
     color: str = "#6366F1"
     description: str = ""
+    permission_level: str = "common"
 
 
 class TagUpdateInput(Schema):
@@ -18,6 +19,7 @@ class TagUpdateInput(Schema):
     color: str | None = None
     description: str | None = None
     is_active: bool | None = None
+    permission_level: str | None = None
 
 
 class TagOutput(Schema):
@@ -28,6 +30,7 @@ class TagOutput(Schema):
     color: str
     description: str
     is_active: bool
+    permission_level: str
     created_by_id: int
     created_at: datetime
     updated_at: datetime
@@ -42,6 +45,7 @@ class TagOutput(Schema):
             color=tag.color,
             description=tag.description,
             is_active=tag.is_active,
+            permission_level=tag.permission_level,
             created_by_id=tag.created_by_id,
             created_at=tag.created_at,
             updated_at=tag.updated_at,
@@ -76,6 +80,7 @@ class ImageTagOutput(Schema):
     tag_name: str
     tag_display_name: str
     tag_color: str
+    tag_permission_level: str
     applied_by_id: int
     note: str
     created_at: datetime
@@ -89,6 +94,7 @@ class ImageTagOutput(Schema):
             tag_name=it.tag.name,
             tag_display_name=it.tag.display_name,
             tag_color=it.tag.color,
+            tag_permission_level=it.tag.permission_level,
             applied_by_id=it.applied_by_id,
             note=it.note,
             created_at=it.created_at,

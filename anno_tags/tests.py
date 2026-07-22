@@ -333,3 +333,211 @@ class TagSoftDeleteTests(TestCase):
         self.assertEqual(
             ImageTag.objects.filter(image=self.image, tag=self.tag).count(), 1
         )
+
+
+class ImageTagApplyPermissionTests(TestCase):
+    """Per-tag apply permission: 'common' / 'worker' / 'supervisor' levels.
+
+    'common' = any member; 'worker'/'supervisor' = only that membership role.
+    Admins are bound by their actual project membership; a system admin who is
+    not a project member is allowed through (per IsProjectMemberOrAdmin).
+    """
+
+    def setUp(self):
+        self.client = Client()
+
+        # Regular members
+        self.worker = User.objects.create_user(username="worker", password="x")
+        self.supervisor = User.objects.create_user(username="sup", password="x")
+
+        # Admin-group users
+        admin_group, _ = Group.objects.get_or_create(name="admin")
+        self.admin_outside = User.objects.create_user(
+            username="admin_out", password="x"
+        )
+        self.admin_outside.groups.add(admin_group)
+        self.admin_worker = User.objects.create_user(
+            username="admin_wrk", password="x"
+        )
+        self.admin_worker.groups.add(admin_group)
+
+        # Project — supervisor is creator (auto-added as supervisor by signal)
+        self.project = Project.objects.create(
+            name="Perm Project", created_by=self.supervisor
+        )
+        ProjectMembership.objects.create(
+            user=self.worker, project=self.project, role="worker",
+            added_by=self.supervisor,
+        )
+        # An admin who is ALSO a worker in this project — must be bound by the
+        # worker membership, not the admin group.
+        ProjectMembership.objects.create(
+            user=self.admin_worker, project=self.project, role="worker",
+            added_by=self.supervisor,
+        )
+
+        self.image = Image2D.objects.create(
+            project=self.project,
+            image=SimpleUploadedFile("t.png", _ONE_PX_PNG, content_type="image/png"),
+            file_name="t.png",
+        )
+
+        # Tags at each permission level
+        self.tag_common = ProjectTag.objects.create(
+            project=self.project, name="common_note", display_name="Common Note",
+            permission_level=ProjectTag.PERMISSION_COMMON, created_by=self.supervisor,
+        )
+        self.tag_worker = ProjectTag.objects.create(
+            project=self.project, name="worker_finish", display_name="Worker Finish",
+            permission_level=ProjectTag.PERMISSION_WORKER, created_by=self.supervisor,
+        )
+        self.tag_supervisor = ProjectTag.objects.create(
+            project=self.project, name="supervisor_review", display_name="Sup Review",
+            permission_level=ProjectTag.PERMISSION_SUPERVISOR,
+            created_by=self.supervisor,
+        )
+
+    def _apply(self, user, tag_id, note=""):
+        return self.client.post(
+            f"/api/projects/{self.project.id}/images/{self.image.id}/tags/",
+            data=json.dumps({"tag_id": tag_id, "note": note}),
+            content_type="application/json",
+            headers=_jwt_headers(user),
+        )
+
+    def _tags_url(self):
+        return f"/api/projects/{self.project.id}/tags/"
+
+    def _assert_applied(self, tag, applied=True):
+        exists = ImageTag.objects.filter(image=self.image, tag=tag).exists()
+        self.assertEqual(exists, applied)
+
+    # ------------------------------------------------------------------
+    # Worker member
+    # ------------------------------------------------------------------
+
+    def test_worker_applies_worker_tag(self):
+        res = self._apply(self.worker, self.tag_worker.id)
+        self.assertEqual(res.status_code, 201)
+        self._assert_applied(self.tag_worker)
+
+    def test_worker_cannot_apply_supervisor_tag(self):
+        res = self._apply(self.worker, self.tag_supervisor.id)
+        self.assertEqual(res.status_code, 403)
+        self._assert_applied(self.tag_supervisor, applied=False)
+
+    def test_worker_applies_common_tag(self):
+        res = self._apply(self.worker, self.tag_common.id)
+        self.assertEqual(res.status_code, 201)
+        self._assert_applied(self.tag_common)
+
+    # ------------------------------------------------------------------
+    # Supervisor member
+    # ------------------------------------------------------------------
+
+    def test_supervisor_applies_supervisor_tag(self):
+        res = self._apply(self.supervisor, self.tag_supervisor.id)
+        self.assertEqual(res.status_code, 201)
+        self._assert_applied(self.tag_supervisor)
+
+    def test_supervisor_cannot_apply_worker_tag(self):
+        res = self._apply(self.supervisor, self.tag_worker.id)
+        self.assertEqual(res.status_code, 403)
+        self._assert_applied(self.tag_worker, applied=False)
+
+    def test_supervisor_applies_common_tag(self):
+        res = self._apply(self.supervisor, self.tag_common.id)
+        self.assertEqual(res.status_code, 201)
+        self._assert_applied(self.tag_common)
+
+    # ------------------------------------------------------------------
+    # Admin — non-member falls through (allowed)
+    # ------------------------------------------------------------------
+
+    def test_admin_non_member_applies_worker_tag(self):
+        res = self._apply(self.admin_outside, self.tag_worker.id)
+        self.assertEqual(res.status_code, 201)
+        self._assert_applied(self.tag_worker)
+
+    def test_admin_non_member_applies_supervisor_tag(self):
+        res = self._apply(self.admin_outside, self.tag_supervisor.id)
+        self.assertEqual(res.status_code, 201)
+        self._assert_applied(self.tag_supervisor)
+
+    # ------------------------------------------------------------------
+    # Admin — bound by their project membership role
+    # ------------------------------------------------------------------
+
+    def test_admin_worker_member_applies_worker_tag(self):
+        res = self._apply(self.admin_worker, self.tag_worker.id)
+        self.assertEqual(res.status_code, 201)
+        self._assert_applied(self.tag_worker)
+
+    def test_admin_worker_member_cannot_apply_supervisor_tag(self):
+        res = self._apply(self.admin_worker, self.tag_supervisor.id)
+        self.assertEqual(res.status_code, 403)
+        self._assert_applied(self.tag_supervisor, applied=False)
+
+    # ------------------------------------------------------------------
+    # Create / update permission_level via the API
+    # ------------------------------------------------------------------
+
+    def test_create_tag_with_permission_level(self):
+        res = self.client.post(
+            self._tags_url(),
+            data=json.dumps({
+                "name": "sup_only",
+                "display_name": "Sup Only",
+                "permission_level": "supervisor",
+            }),
+            content_type="application/json",
+            headers=_jwt_headers(self.supervisor),
+        )
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.json()["permission_level"], "supervisor")
+        tag = ProjectTag.objects.get(project=self.project, name="sup_only")
+        self.assertEqual(tag.permission_level, "supervisor")
+
+    def test_create_tag_defaults_to_common(self):
+        res = self.client.post(
+            self._tags_url(),
+            data=json.dumps({"name": "plain", "display_name": "Plain"}),
+            content_type="application/json",
+            headers=_jwt_headers(self.supervisor),
+        )
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.json()["permission_level"], "common")
+
+    def test_create_tag_invalid_permission_level(self):
+        res = self.client.post(
+            self._tags_url(),
+            data=json.dumps({
+                "name": "bad",
+                "display_name": "Bad",
+                "permission_level": "manager",
+            }),
+            content_type="application/json",
+            headers=_jwt_headers(self.supervisor),
+        )
+        self.assertEqual(res.status_code, 400)
+
+    def test_update_tag_permission_level(self):
+        res = self.client.patch(
+            f"{self._tags_url()}{self.tag_common.id}",
+            data=json.dumps({"permission_level": "supervisor"}),
+            content_type="application/json",
+            headers=_jwt_headers(self.supervisor),
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["permission_level"], "supervisor")
+        self.tag_common.refresh_from_db()
+        self.assertEqual(self.tag_common.permission_level, "supervisor")
+
+    def test_update_tag_invalid_permission_level(self):
+        res = self.client.patch(
+            f"{self._tags_url()}{self.tag_common.id}",
+            data=json.dumps({"permission_level": "boss"}),
+            content_type="application/json",
+            headers=_jwt_headers(self.supervisor),
+        )
+        self.assertEqual(res.status_code, 400)
