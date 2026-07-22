@@ -112,6 +112,10 @@ class TagController:
                 400,
                 "Tag name must contain only lowercase letters, digits, and underscores.",
             )
+        if payload.permission_level not in dict(ProjectTag.PERMISSION_CHOICES):
+            raise HttpError(
+                400, "permission_level must be one of: common, worker, supervisor."
+            )
         if ProjectTag.objects.filter(project=project, name=payload.name).exists():
             raise HttpError(
                 409, f"Tag '{payload.name}' already exists in this project."
@@ -122,6 +126,7 @@ class TagController:
             display_name=payload.display_name,
             color=payload.color,
             description=payload.description,
+            permission_level=payload.permission_level,
             created_by=request.user,
         )
         return 201, TagOutput.from_tag(tag)
@@ -135,7 +140,15 @@ class TagController:
     )
     def update(self, request, project_id: int, tag_id: int, payload: TagUpdateInput):
         tag = get_object_or_404(ProjectTag, id=tag_id, project_id=project_id)
-        for attr, value in payload.model_dump(exclude_unset=True).items():
+        data = payload.model_dump(exclude_unset=True)
+        if (
+            "permission_level" in data
+            and data["permission_level"] not in dict(ProjectTag.PERMISSION_CHOICES)
+        ):
+            raise HttpError(
+                400, "permission_level must be one of: common, worker, supervisor."
+            )
+        for attr, value in data.items():
             setattr(tag, attr, value)
         tag.save()
         return 200, TagOutput.from_tag(tag)
@@ -190,6 +203,17 @@ class ImageTagController:
         tag = get_object_or_404(ProjectTag, id=payload.tag_id, project_id=project_id)
         if not tag.is_active:
             raise HttpError(400, "Cannot apply an inactive tag.")
+        # Per-tag apply permission. "common" = any member; "worker"/"supervisor" =
+        # only that membership role. Admins are treated by their actual project role;
+        # a system admin who is not a project member (allowed here by
+        # IsProjectMemberOrAdmin) has role None and falls through.
+        if tag.permission_level != ProjectTag.PERMISSION_COMMON:
+            role = img.project.get_membership_role(request.user)
+            if role is not None and role != tag.permission_level:
+                raise HttpError(
+                    403,
+                    f"Only {tag.permission_level}s can apply the '{tag.name}' tag.",
+                )
         if ImageTag.objects.filter(image=img, tag=tag).exists():
             raise HttpError(409, f"Tag '{tag.name}' is already applied to this image.")
         image_tag = ImageTag.objects.create(

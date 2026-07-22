@@ -52,6 +52,19 @@ class Project(SoftDeleteModel):
         except ProjectMembership.DoesNotExist:
             return None
 
+    def get_membership_role(self, user) -> str | None:
+        """Return the user's ProjectMembership role in this project, or None.
+
+        Unlike :meth:`get_user_role`, this does NOT treat the Django ``admin``
+        group as a role — an admin is handled by their actual project membership
+        (or lack thereof) by the caller. Used by the tag-apply check so an admin
+        who joined a project as a worker/supervisor is bound by that role.
+        """
+        try:
+            return self.memberships.get(user=user).role
+        except ProjectMembership.DoesNotExist:
+            return None
+
 
 class ProjectMembership(SoftDeleteModel):
     ROLE_CHOICES = [

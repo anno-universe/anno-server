@@ -14,11 +14,12 @@ class ProjectTagAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
         "project",
         "color",
         "is_active",
+        "permission_level",
         "deleted_at",
         "created_by",
         "created_at",
     ]
-    list_filter = ["project", "is_active", "created_at"]
+    list_filter = ["project", "is_active", "permission_level", "created_at"]
     search_fields = ["name", "display_name", "project__name"]
     readonly_fields = ["created_at", "updated_at"]
 

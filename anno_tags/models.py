@@ -12,6 +12,18 @@ class ProjectTag(SoftDeleteModel):
     ``verify_finish``, ``worker_question``, ``supervisor_question``).
     """
 
+    # Who may apply this tag. Values mirror ``ProjectMembership.ROLE_CHOICES``
+    # ("worker"/"supervisor") so the apply check can compare a member's role
+    # directly against ``permission_level``. "common" means any project member.
+    PERMISSION_COMMON = "common"
+    PERMISSION_WORKER = "worker"
+    PERMISSION_SUPERVISOR = "supervisor"
+    PERMISSION_CHOICES = [
+        (PERMISSION_COMMON, "Common"),
+        (PERMISSION_WORKER, "Worker"),
+        (PERMISSION_SUPERVISOR, "Supervisor"),
+    ]
+
     project = models.ForeignKey(
         "anno_projects.Project",
         on_delete=models.CASCADE,
@@ -38,6 +50,15 @@ class ProjectTag(SoftDeleteModel):
     is_active = models.BooleanField(
         default=True,
         help_text="Inactive tags are hidden from the apply UI but remain on existing images.",
+    )
+    permission_level = models.CharField(
+        max_length=20,
+        choices=PERMISSION_CHOICES,
+        default=PERMISSION_COMMON,
+        help_text=(
+            "Which project role may apply this tag: 'common' = any member; "
+            "'worker'/'supervisor' = only that role."
+        ),
     )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
